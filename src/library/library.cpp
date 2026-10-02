@@ -497,7 +497,36 @@ void Library::addFeature(LibraryFeature* feature) {
         return;
     }
     m_features.push_back(feature);
-    m_pSidebarModel->addLibraryFeature(feature);
+
+    // [Library],HiddenSidebarFeatures: comma-separated list of entries to leave out
+    // of the sidebar, e.g. "playlists,crates,analyze,itunes". A hidden feature still
+    // exists and is fully wired up (Auto DJ, the track menus, ... keep working),
+    // it is only not listed in the sidebar.
+    QString sidebarId;
+    if (feature == m_pPlaylistFeature.get()) {
+        sidebarId = QStringLiteral("playlists");
+    } else if (feature == m_pCrateFeature.get()) {
+        sidebarId = QStringLiteral("crates");
+    } else if (feature == m_pAnalysisFeature.get()) {
+        sidebarId = QStringLiteral("analyze");
+    } else if (dynamic_cast<ITunesFeature*>(feature)) {
+        sidebarId = QStringLiteral("itunes");
+    }
+    bool hiddenInSidebar = false;
+    if (!sidebarId.isEmpty()) {
+        const QStringList hidden =
+                m_pConfig->getValueString(ConfigKey(kConfigGroup, "HiddenSidebarFeatures"))
+                        .toLower()
+                        .split(QChar(','), Qt::SkipEmptyParts);
+        for (const QString& name : hidden) {
+            if (name.trimmed() == sidebarId) {
+                hiddenInSidebar = true;
+            }
+        }
+    }
+    if (!hiddenInSidebar) {
+        m_pSidebarModel->addLibraryFeature(feature);
+    }
     connect(feature,
             &LibraryFeature::pasteFromSidebar,
             this,
