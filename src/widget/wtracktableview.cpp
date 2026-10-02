@@ -6,11 +6,13 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QModelIndex>
+#include <QPointer>
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QStylePainter>
+#include <QTimer>
 #include <QUrl>
 
 #include "control/controlobject.h"
@@ -364,9 +366,9 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* pNewModel, bool restore
 
     // Defaults
     setAcceptDrops(true);
-    // Always enable drag for now (until we have a model that doesn't support
-    // this.)
-    setDragEnabled(true);
+    // Row dragging is off in this build: a finger drag scrolls the list instead (see the
+    // QScroller setup in WLibraryTableView). Dropping onto the list still works.
+    setDragEnabled(false);
 
     if (pNewTrackModel->hasCapabilities(TrackModel::Capability::ReceiveDrops)) {
         setDragDropMode(QAbstractItemView::DragDrop);
@@ -450,6 +452,37 @@ void WTrackTableView::slotRowClicked(const QModelIndex& index) {
     m_loadPopupTimer.start();
 }
 
+namespace {
+// How long a popup button shows its "deck is playing" message before reverting.
+constexpr int kLoadPopupMessageMs = 1500;
+} // namespace
+
+// True when loading into `group` would be refused because the deck is playing and the
+// user's settings don't allow loading into a playing deck.
+bool WTrackTableView::isLoadBlockedByPlayingDeck(const QString& group) const {
+    bool allowLoadTrackIntoPlayingDeck = false;
+    if (m_pConfig->exists(kConfigKeyLoadWhenDeckPlaying)) {
+        int loadWhenDeckPlaying =
+                m_pConfig->getValueString(kConfigKeyLoadWhenDeckPlaying).toInt();
+        switch (static_cast<LoadWhenDeckPlaying>(loadWhenDeckPlaying)) {
+        case LoadWhenDeckPlaying::Allow:
+        case LoadWhenDeckPlaying::AllowButStopDeck:
+            allowLoadTrackIntoPlayingDeck = true;
+            break;
+        case LoadWhenDeckPlaying::Reject:
+            break;
+        }
+    } else {
+        // support older version of this flag
+        allowLoadTrackIntoPlayingDeck =
+                m_pConfig->getValue<bool>(kConfigKeyAllowTrackLoadToPlayingDeck);
+    }
+    // Always load to preview deck.
+    return !allowLoadTrackIntoPlayingDeck &&
+            !PlayerManager::isPreviewDeckGroup(group) &&
+            ControlObject::get(ConfigKey(group, "play")) > 0.0;
+}
+
 void WTrackTableView::showLoadPopup() {
     if (!isVisible() || getSelectedRows().isEmpty()) {
         return;
@@ -475,7 +508,20 @@ void WTrackTableView::showLoadPopup() {
         pButton->setObjectName(QStringLiteral("LoadPopupButton"));
         pButton->setFocusPolicy(Qt::NoFocus);
         pLayout->addWidget(pButton);
-        connect(pButton, &QPushButton::clicked, this, [this, pPopup, group]() {
+        connect(pButton, &QPushButton::clicked, this, [this, pPopup, pButton, group, deck]() {
+            if (isLoadBlockedByPlayingDeck(group)) {
+                // Keep the popup open and say why nothing loaded, then restore the label.
+                pButton->setText(tr("DECK %1 PLAYING").arg(deck));
+                const QString label = tr("Load %1").arg(deck);
+                QPointer<QPushButton> pGuard(pButton);
+                QTimer::singleShot(kLoadPopupMessageMs, pButton, [pGuard, label]() {
+                    if (pGuard) {
+                        pGuard->setText(label);
+                    }
+                });
+                pPopup->adjustSize();
+                return;
+            }
             pPopup->close();
 #ifdef __STEM__
             loadSelectedTrackToGroup(group, mixxx::StemChannelSelection(), false);
@@ -813,25 +859,10 @@ void WTrackTableView::mouseMoveEvent(QMouseEvent* pEvent) {
         return;
     }
 
-    TrackModel* pTrackModel = getTrackModel();
-    if (!pTrackModel) {
-        return;
-    }
-    //qDebug() << "MouseMoveEvent";
-
-    if (DragAndDropHelper::mouseMoveInitiatesDrag(pEvent)) {
-        // Iterate over selected rows and append each item's location url to a list.
-        QList<QString> locations;
-        const QModelIndexList indices = getSelectedRows();
-
-        for (const QModelIndex& index : indices) {
-            if (!index.isValid()) {
-                continue;
-            }
-            locations.append(pTrackModel->getTrackLocation(index));
-        }
-        DragAndDropHelper::dragTrackLocations(locations, this, "library");
-    }
+    // Starting a drag of the selected tracks used to happen here. It is gone in this build:
+    // a finger/mouse drag on the list scrolls it instead (QScroller, see WLibraryTableView),
+    // and dragging tracks out of the list isn't needed. Clicking a row (Load popup) is
+    // handled by the clicked() signal and is not affected.
 }
 
 // Drag enter event, happens when a dragged item hovers over the track table view
@@ -1594,29 +1625,8 @@ void WTrackTableView::loadSelectedTrackToGroup(const QString& group,
     if (indices.isEmpty()) {
         return;
     }
-    bool allowLoadTrackIntoPlayingDeck = false;
-    if (m_pConfig->exists(kConfigKeyLoadWhenDeckPlaying)) {
-        int loadWhenDeckPlaying =
-                m_pConfig->getValueString(kConfigKeyLoadWhenDeckPlaying).toInt();
-        switch (static_cast<LoadWhenDeckPlaying>(loadWhenDeckPlaying)) {
-        case LoadWhenDeckPlaying::Allow:
-        case LoadWhenDeckPlaying::AllowButStopDeck:
-            allowLoadTrackIntoPlayingDeck = true;
-            break;
-        case LoadWhenDeckPlaying::Reject:
-            break;
-        }
-    } else {
-        // support older version of this flag
-        allowLoadTrackIntoPlayingDeck =
-                m_pConfig->getValue<bool>(kConfigKeyAllowTrackLoadToPlayingDeck);
-    }
-    // If the track load override is disabled, check to see if a track is
-    // playing before trying to load it.
-    // Always load to preview deck.
-    if (!allowLoadTrackIntoPlayingDeck &&
-            !PlayerManager::isPreviewDeckGroup(group) &&
-            ControlObject::get(ConfigKey(group, "play")) > 0.0) {
+    // If the track load override is disabled, don't load into a playing deck.
+    if (isLoadBlockedByPlayingDeck(group)) {
         return;
     }
     auto index = indices.at(0);

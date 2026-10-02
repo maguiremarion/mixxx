@@ -1,6 +1,8 @@
 #include "widget/wlibrarysidebar.h"
 
 #include <QHeaderView>
+#include <QScroller>
+#include <QScrollerProperties>
 #include <QUrl>
 #include <QtDebug>
 
@@ -29,6 +31,18 @@ WLibrarySidebar::WLibrarySidebar(QWidget* parent)
     header()->setStretchLastSection(false);
     header()->setSectionResizeMode(QHeaderView::ResizeToContents);
     header()->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+
+    // Finger scrolling, like the track table.
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    QScroller::grabGesture(viewport(), QScroller::LeftMouseButtonGesture);
+    QScrollerProperties scrollerProps = QScroller::scroller(viewport())->scrollerProperties();
+    scrollerProps.setScrollMetric(QScrollerProperties::MousePressEventDelay, 0.08);
+    scrollerProps.setScrollMetric(QScrollerProperties::DragStartDistance, 0.004);
+    scrollerProps.setScrollMetric(QScrollerProperties::VerticalOvershootPolicy,
+            QScrollerProperties::OvershootAlwaysOff);
+    scrollerProps.setScrollMetric(QScrollerProperties::HorizontalOvershootPolicy,
+            QScrollerProperties::OvershootAlwaysOff);
+    QScroller::scroller(viewport())->setScrollerProperties(scrollerProps);
 }
 
 void WLibrarySidebar::contextMenuEvent(QContextMenuEvent* pEvent) {

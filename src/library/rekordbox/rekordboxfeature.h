@@ -25,6 +25,7 @@
 #pragma once
 
 #include <QFuture>
+#include <QHash>
 #include <QFutureWatcher>
 #include <QStringListModel>
 #include <QtConcurrentRun>
@@ -33,6 +34,7 @@
 #include "library/baseexternallibraryfeature.h"
 #include "library/baseexternalplaylistmodel.h"
 #include "library/baseexternaltrackmodel.h"
+#include "library/coverart.h"
 #include "library/treeitemmodel.h"
 #include "util/parented_ptr.h"
 
@@ -48,9 +50,18 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
     TrackPointer getTrack(const QModelIndex& index) const override;
     bool isColumnHiddenByDefault(int column) override;
     bool isColumnInternal(int column) override;
+    /// What a fresh install shows in the Rekordbox view (sized for a 1024x600 screen).
+    QList<QPair<int, int>> defaultColumnLayout() const override;
+    /// Rekordbox tracks aren't in Mixxx's library, so there is no stored cover art for
+    /// them. Work it out from the file (embedded art, or an image in its folder) the first
+    /// time a row is drawn and remember it.
+    CoverInfo getCoverInfo(const QModelIndex& index) const override;
 
   protected:
     void initSortColumnMapping() override;
+
+  private:
+    mutable QHash<QString, CoverInfo> m_coverInfoByLocation;
 };
 
 class RekordboxFeature : public BaseExternalLibraryFeature {

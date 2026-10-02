@@ -166,6 +166,7 @@ class WTrackTableView : public WLibraryTableView {
     // loads to the first free deck) can cancel it; showLoadPopup() opens it.
     void slotRowClicked(const QModelIndex& index);
     void showLoadPopup();
+    bool isLoadBlockedByPlayingDeck(const QString& group) const;
 
   protected:
     QString getModelStateKey() const override;

@@ -1,5 +1,7 @@
 #include "woverview.h"
 
+#include <cmath>
+
 #include <QBrush>
 #include <QColor>
 #include <QGuiApplication>
@@ -60,6 +62,8 @@ WOverview::WOverview(
           m_bLeftClickDragging(false),
           m_iPickupPos(0),
           m_iPlayPos(0),
+          m_dPlayPosExact(0.0),
+          m_dPlayPosDrawn(0.0),
           m_bTimeRulerActive(false),
           m_orientation(Qt::Horizontal),
           m_dragMarginH(kDragOutsideLimitX),
@@ -307,6 +311,11 @@ void WOverview::onConnectedControlChanged(double dParameter, double dValue) {
     int oldPos = m_iPlayPos;
     m_iPlayPos = valueToPosition(dParameter);
     if (oldPos != m_iPlayPos) {
+        redraw = true;
+    }
+    // Repaint for sub-pixel movement too, but not for every tiny control update.
+    m_dPlayPosExact = m_maxPixelPos * dParameter;
+    if (std::abs(m_dPlayPosExact - m_dPlayPosDrawn) >= 0.1) {
         redraw = true;
     }
 
@@ -908,10 +917,10 @@ void WOverview::drawPlayedOverlay(QPainter* pPainter) {
                     m_iPlayPos,
                     m_playedOverlayColor);
         } else {
-            pPainter->fillRect(0,
-                    0,
-                    m_iPlayPos,
-                    m_waveformImageScaled.height(),
+            pPainter->fillRect(QRectF(0,
+                                       0,
+                                       m_dPlayPosExact,
+                                       m_waveformImageScaled.height()),
                     m_playedOverlayColor);
         }
     }
@@ -1271,27 +1280,37 @@ void WOverview::drawPickupPosition(QPainter* pPainter) {
     if (m_orientation == Qt::Vertical) {
         pPainter->setTransform(QTransform(0, 1, 1, 0, 0, 0));
     }
+    // Anti-aliasing is what lets a line sit between two pixels, i.e. move smoothly.
+    pPainter->setRenderHint(QPainter::Antialiasing, true);
+
+    // While dragging, the pickup is where the mouse is (whole pixels); otherwise it follows
+    // the exact play position.
+    const double x = m_bLeftClickDragging ? m_iPickupPos : m_dPlayPosExact;
+    if (!m_bLeftClickDragging) {
+        m_dPlayPosDrawn = m_dPlayPosExact;
+    }
+    const double bottom = breadth();
 
     // draw dark play position outlines
     pPainter->setPen(QPen(QBrush(m_backgroundColor), m_scaleFactor));
     pPainter->setOpacity(0.5);
-    pPainter->drawLine(m_iPickupPos + 1, 0, m_iPickupPos + 1, breadth());
-    pPainter->drawLine(m_iPickupPos - 1, 0, m_iPickupPos - 1, breadth());
+    pPainter->drawLine(QLineF(x + 1, 0, x + 1, bottom));
+    pPainter->drawLine(QLineF(x - 1, 0, x - 1, bottom));
 
     // draw colored play position line
     pPainter->setPen(QPen(m_playPosColor, m_scaleFactor));
     pPainter->setOpacity(1.0);
-    pPainter->drawLine(m_iPickupPos, 0, m_iPickupPos, breadth());
+    pPainter->drawLine(QLineF(x, 0, x, bottom));
 
     // draw triangle at the top
-    pPainter->drawLine(m_iPickupPos - 2, 0, m_iPickupPos, 2);
-    pPainter->drawLine(m_iPickupPos, 2, m_iPickupPos + 2, 0);
-    pPainter->drawLine(m_iPickupPos - 2, 0, m_iPickupPos + 2, 0);
+    pPainter->drawLine(QLineF(x - 2, 0, x, 2));
+    pPainter->drawLine(QLineF(x, 2, x + 2, 0));
+    pPainter->drawLine(QLineF(x - 2, 0, x + 2, 0));
 
     // draw triangle at the bottom
-    pPainter->drawLine(m_iPickupPos - 2, breadth() - 1, m_iPickupPos, breadth() - 3);
-    pPainter->drawLine(m_iPickupPos, breadth() - 3, m_iPickupPos + 2, breadth() - 1);
-    pPainter->drawLine(m_iPickupPos - 2, breadth() - 1, m_iPickupPos + 2, breadth() - 1);
+    pPainter->drawLine(QLineF(x - 2, bottom - 1, x, bottom - 3));
+    pPainter->drawLine(QLineF(x, bottom - 3, x + 2, bottom - 1));
+    pPainter->drawLine(QLineF(x - 2, bottom - 1, x + 2, bottom - 1));
 }
 
 void WOverview::drawTimeRuler(QPainter* pPainter) {

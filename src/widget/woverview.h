@@ -176,6 +176,10 @@ class WOverview : public WWidget, public TrackDropTarget {
     int m_iPickupPos;
     // position of the overlay shadow
     int m_iPlayPos;
+    // Same position without rounding to a whole pixel, so the playhead glides instead of
+    // stepping once per pixel (one step every second or so on a short overview).
+    double m_dPlayPosExact;
+    double m_dPlayPosDrawn;
     bool m_bTimeRulerActive;
     Qt::Orientation m_orientation;
     int m_dragMarginH;

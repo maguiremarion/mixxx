@@ -2,6 +2,7 @@
 
 #include <QItemDelegate>
 #include <QList>
+#include <QPair>
 #include <QUrl>
 #include <QVector>
 
@@ -148,6 +149,12 @@ class TrackModel {
     // if no header state exists, we may hide some columns so that the user can
     // reactivate them
     virtual bool isColumnHiddenByDefault(int column) = 0;
+    /// Optional default layout, used when no layout has been saved for this model yet:
+    /// the columns to show, in order, as (column index, width in pixels). Every column that
+    /// isn't listed starts hidden. Empty (the default) keeps Mixxx's usual defaults.
+    virtual QList<QPair<int, int>> defaultColumnLayout() const {
+        return {};
+    }
     virtual const QList<int>& searchColumns() const { return m_emptyColumns; }
 
     virtual void removeTracks(const QModelIndexList& indices) {

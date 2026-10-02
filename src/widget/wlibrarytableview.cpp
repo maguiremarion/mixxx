@@ -5,6 +5,8 @@
 #include <QFontMetrics>
 #include <QHeaderView>
 #include <QHelpEvent>
+#include <QScroller>
+#include <QScrollerProperties>
 #include <QScrollBar>
 #include <QToolTip>
 
@@ -45,6 +47,19 @@ WLibraryTableView::WLibraryTableView(QWidget* parent,
     //Work around a Qt bug that lets you make your columns so wide you
     //can't reach the divider to make them small again.
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+
+    // Finger scrolling: dragging anywhere in the list scrolls it (with momentum) instead of
+    // starting a drag of the row under the finger. Per-pixel mode makes that smooth.
+    setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    QScroller::grabGesture(viewport(), QScroller::LeftMouseButtonGesture);
+    QScrollerProperties scrollerProps = QScroller::scroller(viewport())->scrollerProperties();
+    scrollerProps.setScrollMetric(QScrollerProperties::MousePressEventDelay, 0.08);
+    scrollerProps.setScrollMetric(QScrollerProperties::DragStartDistance, 0.004);
+    scrollerProps.setScrollMetric(QScrollerProperties::VerticalOvershootPolicy,
+            QScrollerProperties::OvershootAlwaysOff);
+    scrollerProps.setScrollMetric(QScrollerProperties::HorizontalOvershootPolicy,
+            QScrollerProperties::OvershootAlwaysOff);
+    QScroller::scroller(viewport())->setScrollerProperties(scrollerProps);
 
     verticalHeader()->hide();
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
@@ -231,6 +246,16 @@ void WLibraryTableView::setTrackTableFont(const QFont& font) {
         // Header height will not be adjusted correctly now, only after loading the model.
         horizontalHeader()->setFont(font);
     }
+}
+
+int WLibraryTableView::minRowHeight() const {
+    return verticalHeader()->minimumSectionSize();
+}
+
+void WLibraryTableView::setMinRowHeight(int height) {
+    verticalHeader()->setMinimumSectionSize(height);
+    verticalHeader()->setDefaultSectionSize(
+            math_max(height, verticalHeader()->defaultSectionSize()));
 }
 
 void WLibraryTableView::setTrackTableRowHeight(int rowHeight) {

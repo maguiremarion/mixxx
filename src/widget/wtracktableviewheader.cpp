@@ -4,6 +4,7 @@
 #include <QContextMenuEvent>
 #include <QLabel>
 #include <QPainter>
+#include <QSet>
 #include <QStyleOptionHeader>
 #include <QTextOption>
 #include <QWidgetAction>
@@ -323,6 +324,29 @@ void WTrackTableViewHeader::loadDefaultHeaderState() {
                                   .toInt();
         if (header_size > 0) {
             resizeSection(i, header_size);
+        }
+    }
+
+    // A model can ask for its own starting layout: which columns, in which order, how wide.
+    TrackModel* pTrackModel = getTrackModel();
+    const QList<QPair<int, int>> layout =
+            pTrackModel ? pTrackModel->defaultColumnLayout() : QList<QPair<int, int>>();
+    if (layout.isEmpty()) {
+        return;
+    }
+    QSet<int> shown;
+    int position = 0;
+    for (const auto& [column, width] : layout) {
+        if (column < 0 || column >= count()) {
+            continue;
+        }
+        shown.insert(column);
+        resizeSection(column, width);
+        moveSection(visualIndex(column), position++);
+    }
+    for (int i = 0; i < count(); ++i) {
+        if (!shown.contains(i)) {
+            hideSection(i);
         }
     }
 }

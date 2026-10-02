@@ -6,8 +6,14 @@
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QFrame>
+#include <QGuiApplication>
+#include <QHBoxLayout>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPointer>
+#include <QPushButton>
+#include <QScreen>
 
 #include "engine/controls/cuecontrol.h"
 #include "mixer/playerinfo.h"
@@ -26,6 +32,24 @@ constexpr int kDefaultDimBrightThreshold = 127;
 
 using namespace mixxx::hotcuedrag;
 
+namespace {
+// How long a set pad has to be held before the delete popup opens.
+constexpr int kLongPressMs = 600;
+
+CuePointer findHotCue(const TrackPointer& pTrack, int hotcue) {
+    if (!pTrack) {
+        return CuePointer();
+    }
+    const QList<CuePointer> cueList = pTrack->getCuePoints();
+    for (const auto& pCue : cueList) {
+        if (pCue->getHotCue() == hotcue) {
+            return pCue;
+        }
+    }
+    return CuePointer();
+}
+} // namespace
+
 WHotcueButton::WHotcueButton(QWidget* pParent, const QString& group)
         : WPushButton(pParent),
           m_group(group),
@@ -37,6 +61,9 @@ WHotcueButton::WHotcueButton(QWidget* pParent, const QString& group)
           m_bCueColorIsLight(false),
           m_bCueColorIsDark(false) {
     setAcceptDrops(true);
+    m_longPressTimer.setSingleShot(true);
+    m_longPressTimer.setInterval(kLongPressMs);
+    connect(&m_longPressTimer, &QTimer::timeout, this, &WHotcueButton::showDeletePopup);
 }
 
 void WHotcueButton::setup(const QDomNode& node, const SkinContext& context) {
@@ -213,9 +240,65 @@ void WHotcueButton::mousePressEvent(QMouseEvent* pEvent) {
     // Except when Shift is pressed which is used to swap hotcues without
     // starting the preview.
     if (!pEvent->modifiers().testFlag(Qt::ShiftModifier)) {
+        // Only a pad that is already set can be long-pressed (pressing an empty pad
+        // sets a cue, which must not immediately arm the delete popup).
+        const bool wasSet = readDisplayValue() != 0;
         WPushButton::mousePressEvent(pEvent);
         DragAndDropHelper::mousePressed(pEvent);
+        if (wasSet && pEvent->button() == Qt::LeftButton) {
+            m_pressPos = pEvent->pos();
+            m_longPressTimer.start();
+        }
     }
+}
+
+void WHotcueButton::showDeletePopup() {
+    TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
+    if (!findHotCue(pTrack, m_hotcue)) {
+        return;
+    }
+
+    // Let go of the pad first (stops the preview): a Qt::Popup grabs the mouse, so it
+    // would otherwise get the release and leave this button stuck in the pressed state.
+    QMouseEvent release(QEvent::MouseButtonRelease,
+            m_pressPos,
+            mapToGlobal(m_pressPos),
+            Qt::LeftButton,
+            Qt::NoButton,
+            Qt::NoModifier);
+    WPushButton::mouseReleaseEvent(&release);
+
+    auto* pPopup = new QFrame(this, Qt::Popup);
+    pPopup->setObjectName(QStringLiteral("CueDeletePopup"));
+    pPopup->setAttribute(Qt::WA_DeleteOnClose);
+    pPopup->setAttribute(Qt::WA_StyledBackground);
+    auto* pLayout = new QHBoxLayout(pPopup);
+    pLayout->setContentsMargins(0, 0, 0, 0);
+    pLayout->setSpacing(0);
+
+    auto* pDelete = new QPushButton(
+            tr("Delete cue %1").arg(QChar('A' + m_hotcue)), pPopup);
+    pDelete->setObjectName(QStringLiteral("CueDeleteButton"));
+    pDelete->setFocusPolicy(Qt::NoFocus);
+    pLayout->addWidget(pDelete);
+    connect(pDelete, &QPushButton::clicked, this, [this, pPopup]() {
+        pPopup->close();
+        TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
+        if (CuePointer pCue = findHotCue(pTrack, m_hotcue)) {
+            pTrack->removeCue(pCue);
+        }
+    });
+
+    // Open just above the pad (the grid sits low on the screen), kept on-screen.
+    pPopup->adjustSize();
+    QPoint pos = mapToGlobal(QPoint(0, -pPopup->height()));
+    if (const QScreen* pScreen = screen()) {
+        const QRect avail = pScreen->availableGeometry();
+        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
+    }
+    pPopup->move(pos);
+    pPopup->show();
 }
 
 void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
@@ -224,10 +307,16 @@ void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
         // Don't handle stray release events
         return;
     }
+    m_longPressTimer.stop();
     WPushButton::mouseReleaseEvent(pEvent);
 }
 
 void WHotcueButton::mouseMoveEvent(QMouseEvent* pEvent) {
+    // Moving away (or starting a drag-swap) cancels the long press.
+    if (m_longPressTimer.isActive() &&
+            (pEvent->pos() - m_pressPos).manhattanLength() > QApplication::startDragDistance()) {
+        m_longPressTimer.stop();
+    }
     TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
     if (!pTrack) {
         return;

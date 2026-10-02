@@ -14,6 +14,7 @@
 #include <QtDebug>
 
 #include "engine/engine.h"
+#include "library/coverartutils.h"
 #include "library/dao/trackschema.h"
 #include "library/library.h"
 #include "library/queryutil.h"
@@ -114,7 +115,10 @@ bool createLibraryTable(QSqlDatabase& database, const QString& tableName) {
             "    rating INTEGER,"
             "    analyze_path TEXT UNIQUE,"
             "    device TEXT,"
-            "    color INTEGER"
+            "    color INTEGER,"
+            // Always NULL: only here so the model has a Cover Art column (the images
+            // come from RekordboxPlaylistModel::getCoverInfo()).
+            "    coverart BLOB"
             ");");
 
     if (!query.exec()) {
@@ -1333,6 +1337,45 @@ TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
     return track;
 }
 
+CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
+    const QString location = QDir::fromNativeSeparators(getTrackLocation(index));
+    if (location.isEmpty()) {
+        return CoverInfo();
+    }
+    const auto cached = m_coverInfoByLocation.constFind(location);
+    if (cached != m_coverInfoByLocation.constEnd()) {
+        return cached.value();
+    }
+
+    // Guess from the file itself, without adding it to the Mixxx library: a temporary
+    // track is never stored. Missing files and files without art give an empty CoverInfo,
+    // which is remembered too so the file isn't read again on every repaint.
+    CoverInfo coverInfo;
+    if (QFile::exists(location)) {
+        TrackPointer pTrack = Track::newTemporary(location);
+        if (pTrack) {
+            pTrack->setAlbum(getFieldString(index, ColumnCache::COLUMN_LIBRARYTABLE_ALBUM));
+            coverInfo = CoverInfo(CoverInfoGuesser().guessCoverInfoForTrack(pTrack), location);
+        }
+    }
+    m_coverInfoByLocation.insert(location, coverInfo);
+    return coverInfo;
+}
+
+QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
+    // Cover art, then the things you pick a track by. Widths add up to about the 760 px the
+    // list gets next to the sidebar on a 1024 px wide screen; everything else is hidden
+    // (it can be turned back on from the header's right-click menu).
+    return {
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 56},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 300},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 200},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 66},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 60},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 76},
+    };
+}
+
 bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {
     if (column == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BITRATE)) {
         return true;
@@ -1368,6 +1411,7 @@ RekordboxFeature::RekordboxFeature(
             LIBRARYTABLE_BPM,
             LIBRARYTABLE_KEY,
             LIBRARYTABLE_COLOR,
+            LIBRARYTABLE_COVERART,
             REKORDBOX_ANALYZE_PATH};
 
     const QStringList searchColumns = {

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <QPoint>
 #include <QString>
+#include <QTimer>
 
 #include "util/parented_ptr.h"
 #include "widget/wcuemenupopup.h"
@@ -41,6 +43,9 @@ class WHotcueButton : public WPushButton {
     void restyleAndRepaint() override;
 
   private slots:
+    /// Holding a set pad opens a small "Delete" popup (easier than the right-click
+    /// cue menu on a touchscreen / in a small window).
+    void showDeletePopup();
     void slotColorChanged(double color);
     void slotTypeChanged(double type);
     void slotUpdateDirection(double = 0);
@@ -65,6 +70,8 @@ class WHotcueButton : public WPushButton {
     /// Callers should not use m_pCueMenuPopup directly because it is lazy-loaded.
     /// Use getCueMenuPopup() instead to ensure the menu is populated.
     parented_ptr<WCueMenuPopup> m_pCueMenuPopup;
+    QTimer m_longPressTimer;
+    QPoint m_pressPos;
     int m_cueColorDimThreshold;
     bool m_bCueColorDimmed;
     bool m_bCueColorIsLight;

@@ -29,6 +29,12 @@ class WLibraryTableView : public QTableView, public virtual LibraryView {
             UserSettingsPointer pConfig);
     ~WLibraryTableView() override;
 
+    /// Smallest row height, settable from the skin (qproperty-minRowHeight in the QSS).
+    /// Row height is otherwise a user preference scaled by font, which a skin can't change.
+    Q_PROPERTY(int minRowHeight READ minRowHeight WRITE setMinRowHeight)
+    int minRowHeight() const;
+    void setMinRowHeight(int height);
+
     /// @brief saveTrackModelState function saves current positions of scrollbars,
     /// current item selection and current index in a QCache using a unique
     /// string key - can be any value but should invariant for model
