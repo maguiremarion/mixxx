@@ -1852,6 +1852,7 @@ add_library(
   src/widget/wvumeter.cpp
   src/widget/wvumeterbase.cpp
   src/widget/wvumeterlegacy.cpp
+  src/widget/wvolumeeject.cpp
   src/widget/wwaveformviewer.cpp
   src/widget/wwidget.cpp
   src/widget/wwidgetgroup.cpp

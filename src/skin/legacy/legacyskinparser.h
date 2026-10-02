@@ -82,6 +82,7 @@ class LegacySkinParser : public QObject, public SkinParser {
 #endif
     QWidget* parseBpmEditor(const QDomElement& node);
     QWidget* parseText(const QDomElement& node);
+    QWidget* parseVolumeEject(const QDomElement& node);
     QWidget* parseTrackProperty(const QDomElement& node);
     QWidget* parseStarRating(const QDomElement& node);
     QWidget* parseRateRange(const QDomElement& node);

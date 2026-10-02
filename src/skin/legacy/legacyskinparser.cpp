@@ -86,6 +86,7 @@
 #include "widget/wtime.h"
 #include "widget/wtrackproperty.h"
 #include "widget/wtrackwidgetgroup.h"
+#include "widget/wvolumeeject.h"
 #include "widget/wvumeter.h"
 #include "widget/wvumeterglsl.h"
 #include "widget/wvumeterlegacy.h"
@@ -640,6 +641,8 @@ QList<QWidget*> LegacySkinParser::parseNode(const QDomElement& node) {
         result = wrapWidget(parseLabelWidget<WTime>(node));
     } else if (nodeName == "RecordingDuration") {
         result = wrapWidget(parseRecordingDuration(node));
+    } else if (nodeName == "VolumeEject") {
+        result = wrapWidget(parseVolumeEject(node));
     } else if (nodeName == "Splitter") {
         result = wrapWidget(parseSplitter(node));
     } else if (nodeName == "LibrarySidebar") {
@@ -1396,6 +1399,14 @@ QWidget* LegacySkinParser::parseBattery(const QDomElement& node) {
     setupConnections(node, p);
     p->installEventFilter(m_pKeyboard);
     p->installEventFilter(m_pControllerManager->getControllerLearningEventFilter());
+    return p;
+}
+
+QWidget* LegacySkinParser::parseVolumeEject(const QDomElement& node) {
+    WVolumeEject* p = new WVolumeEject(m_pParent, m_pPlayerManager);
+    setupBaseWidget(node, p);
+    setupWidget(node, p);
+    p->setup(node, *m_pContext);
     return p;
 }
 
