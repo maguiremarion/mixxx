@@ -868,6 +868,9 @@ void setHotCue(TrackPointer track,
     }
 
     if (pCue) {
+        // The cue may have been imported before as a plain hot cue (or the other
+        // way round, if the loop was removed in Rekordbox), so update its type too.
+        pCue->setType(type);
         pCue->setStartAndEndPosition(startPosition, endPosition);
     } else {
         pCue = track->createAndAddCue(
@@ -980,10 +983,21 @@ void readAnalyze(TrackPointer track,
                     if (hotCueIndex > lastHotCueIndex) {
                         lastHotCueIndex = hotCueIndex;
                     }
+                    // A Rekordbox hot cue can carry a loop ("cue with loop"). Import it
+                    // as a Mixxx saved loop so triggering it jumps there AND loops.
+                    mixxx::audio::FramePos hotCueEnd = mixxx::audio::kInvalidFramePos;
+                    if (cueEntry->type() == rekordbox_anlz_t::CUE_ENTRY_TYPE_LOOP) {
+                        int endTime = static_cast<int>(cueEntry->loop_time()) - timingOffset;
+                        if (endTime < 1) {
+                            endTime = 1;
+                        }
+                        hotCueEnd = mixxx::audio::FramePos(
+                                sampleRateKhz * static_cast<double>(endTime));
+                    }
                     setHotCue(
                             track,
                             position,
-                            mixxx::audio::kInvalidFramePos,
+                            hotCueEnd,
                             hotCueIndex,
                             QString(),
                             mixxx::RgbColor::nullopt());
@@ -1046,9 +1060,20 @@ void readAnalyze(TrackPointer track,
                     if (hotCueIndex > lastHotCueIndex) {
                         lastHotCueIndex = hotCueIndex;
                     }
+                    // Hot cue with a loop: see the note in the basic cue tag above.
+                    mixxx::audio::FramePos hotCueEnd = mixxx::audio::kInvalidFramePos;
+                    if (cueExtendedEntry->type() == rekordbox_anlz_t::CUE_ENTRY_TYPE_LOOP) {
+                        int endTime = static_cast<int>(cueExtendedEntry->loop_time()) -
+                                timingOffset;
+                        if (endTime < 1) {
+                            endTime = 1;
+                        }
+                        hotCueEnd = mixxx::audio::FramePos(
+                                sampleRateKhz * static_cast<double>(endTime));
+                    }
                     setHotCue(track,
                             position,
-                            mixxx::audio::kInvalidFramePos,
+                            hotCueEnd,
                             hotCueIndex,
                             fromUtf16BeString(cueExtendedEntry->comment()),
                             mixxx::RgbColor(qRgb(
