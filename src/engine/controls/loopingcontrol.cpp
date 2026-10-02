@@ -1,5 +1,7 @@
 #include "engine/controls/loopingcontrol.h"
 
+#include <cmath>
+
 #include <QtDebug>
 
 #include "control/controlobject.h"
@@ -16,6 +18,9 @@
 #include "util/math.h"
 
 namespace {
+// Relative tolerance when matching a measured loop length to a beatloop_N size.
+constexpr double kBeatloopSizeTolerance = 0.01;
+
 constexpr mixxx::audio::FrameDiff_t kMinimumAudibleLoopSizeFrames = 150;
 
 // returns true if a is valid and is fairly close to target (within +/- 1 frame).
@@ -1433,7 +1438,13 @@ void LoopingControl::updateBeatLoopingControls() {
     // fine.
     double dBeatloopSize = m_pCOBeatLoopSize->get();
     for (BeatLoopingControl* pBeatLoopControl : std::as_const(m_beatLoops)) {
-        if (pBeatLoopControl->getSize() == dBeatloopSize) {
+        // Compare with a small tolerance. A loop measured on a real beat grid
+        // (e.g. a hot cue loop imported from Rekordbox) is rarely EXACTLY 16 beats
+        // long (it comes out as 15.994...), and with exact equality the matching
+        // beatloop_N control would then never light up. The sizes are a factor of
+        // two apart, so 1% can't select the wrong one.
+        const double size = pBeatLoopControl->getSize();
+        if (std::abs(size - dBeatloopSize) <= size * kBeatloopSizeTolerance) {
             if (m_bLoopingEnabled) {
                 pBeatLoopControl->activate();
             }
