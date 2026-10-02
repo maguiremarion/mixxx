@@ -11,6 +11,7 @@
 
 class ControlObject;
 class ControlPushButton;
+class VolumeWatcher;
 class DlgDeveloperTools;
 class DlgPreferences;
 class DlgKeywheel;
@@ -153,6 +154,15 @@ class MixxxMainWindow : public QMainWindow {
     DlgPreferences* m_pPrefDlg;
     // [App],show_preferences: lets a skin button / controller open Preferences.
     std::unique_ptr<ControlPushButton> m_pShowPreferences;
+    // [App],rescan_library / [App],library_scan_active: Library > Rescan Library
+    // (Ctrl+Shift+L) as controls for skins and controllers.
+    std::unique_ptr<ControlPushButton> m_pRescanLibrary;
+    std::unique_ptr<ControlObject> m_pLibraryScanActive;
+    // Rescan the library when an external volume is mounted or removed.
+    // [App],auto_rescan_on_volume_change (persistent toggle, default on) switches it off.
+    VolumeWatcher* m_pVolumeWatcher = nullptr;
+    std::unique_ptr<ControlPushButton> m_pAutoRescanOnVolumeChange;
+    bool m_rescanPending = false;
     parented_ptr<DlgKeywheel> m_pKeywheel;
 
 #ifdef __ENGINEPRIME__

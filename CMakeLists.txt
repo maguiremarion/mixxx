@@ -1515,6 +1515,7 @@ add_library(
   src/library/trackcollectioniterator.cpp
   src/library/trackcollectionmanager.cpp
   src/library/trackloader.cpp
+  src/library/volumewatcher.cpp
   src/library/trackmodeliterator.cpp
   src/library/trackprocessing.cpp
   src/library/trackset/baseplaylistfeature.cpp

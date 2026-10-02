@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QOpenGLContext>
+#include <QTimer>
 #include <QUrl>
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -36,6 +37,7 @@
 #endif
 #include "control/controlindicatortimer.h"
 #include "control/controlpushbutton.h"
+#include "library/volumewatcher.h"
 #include "library/library.h"
 #include "library/library_decl.h"
 #include "library/library_prefs.h"
@@ -343,6 +345,69 @@ void MixxxMainWindow::initialize() {
                     slotOptionsPreferences();
                 }
             });
+
+    // Library > Rescan Library (Ctrl+Shift+L) as controls, so a skin button can
+    // start it and show progress. Same rule as above: create them BEFORE the
+    // skin loads.
+    //   [App],rescan_library       push button; ignored while a scan is running
+    //   [App],library_scan_active  1 while a scan is running, else 0
+    m_pRescanLibrary = std::make_unique<ControlPushButton>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("rescan_library")));
+    m_pLibraryScanActive = std::make_unique<ControlObject>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("library_scan_active")));
+    if (auto pTrackCollectionManager = m_pCoreServices->getTrackCollectionManager()) {
+        connect(m_pRescanLibrary.get(),
+                &ControlPushButton::valueChanged,
+                this,
+                [this, pTrackCollectionManager](double value) {
+                    if (value > 0.0 && m_pLibraryScanActive->get() <= 0.0) {
+                        pTrackCollectionManager->startLibraryScan();
+                    }
+                });
+        connect(pTrackCollectionManager.get(),
+                &TrackCollectionManager::libraryScanStarted,
+                this,
+                [this]() { m_pLibraryScanActive->set(1.0); });
+        connect(pTrackCollectionManager.get(),
+                &TrackCollectionManager::libraryScanFinished,
+                this,
+                [this, pTrackCollectionManager]() {
+                    m_pLibraryScanActive->set(0.0);
+                    // A volume changed while a scan was running: scan again, but
+                    // give the scanner a moment to return to idle first.
+                    if (m_rescanPending) {
+                        m_rescanPending = false;
+                        QTimer::singleShot(500, this, [pTrackCollectionManager]() {
+                            pTrackCollectionManager->startLibraryScan();
+                        });
+                    }
+                });
+
+        // Plugging in or removing a USB stick / SD card / external drive
+        // triggers a rescan, so new music shows up without a manual rescan.
+        // Note: a scan uses CPU and disk, so switch this off for a live set:
+        // [App],auto_rescan_on_volume_change = 0.
+        m_pAutoRescanOnVolumeChange = std::make_unique<ControlPushButton>(
+                ConfigKey(QStringLiteral("[App]"),
+                        QStringLiteral("auto_rescan_on_volume_change")),
+                /*persist*/ true,
+                /*defaultValue*/ 1.0);
+        m_pAutoRescanOnVolumeChange->setButtonMode(mixxx::control::ButtonMode::Toggle);
+        m_pVolumeWatcher = new VolumeWatcher(this);
+        connect(m_pVolumeWatcher,
+                &VolumeWatcher::volumesChanged,
+                this,
+                [this, pTrackCollectionManager]() {
+                    if (m_pAutoRescanOnVolumeChange->get() <= 0.0) {
+                        return;
+                    }
+                    if (m_pLibraryScanActive->get() > 0.0) {
+                        m_rescanPending = true; // run it once the current scan ends
+                    } else {
+                        pTrackCollectionManager->startLibraryScan();
+                    }
+                });
+    }
 
     // Connect signals to the menubar. Should be done before emit skinLoaded.
     connectMenuBar();
