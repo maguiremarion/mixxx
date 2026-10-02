@@ -94,6 +94,16 @@ EffectSlot::EffectSlot(const QString& group,
             this,
             &EffectSlot::slotLoadedEffectRequest);
 
+    // load_builtin: load a built-in effect by a FIXED number. loaded_effect is an index into
+    // the visible effects list, which changes when effects are hidden or LV2 plugins are
+    // installed, so a controller script can't rely on it. The numbers below never change.
+    m_pControlLoadBuiltin = std::make_unique<ControlPushButton>(
+            ConfigKey(m_group, "load_builtin"));
+    connect(m_pControlLoadBuiltin.get(),
+            &ControlObject::valueChanged,
+            this,
+            &EffectSlot::slotLoadBuiltin);
+
     connect(m_pVisibleEffects.get(),
             &VisibleEffectsList::visibleEffectsListChanged,
             this,
@@ -528,6 +538,35 @@ void EffectSlot::slotLoadedEffectRequest(double value) {
     }
     // loadEffectInner calls setAndConfirm
     loadEffectWithDefaults(m_pVisibleEffects->at(index));
+}
+
+void EffectSlot::slotLoadBuiltin(double value) {
+    // 1 filter, 2 flanger, 3 echo, 4 reverb, 5 phaser, 6 bitcrusher, 7 tremolo,
+    // 8 autopan, 9 distortion, 10 moog ladder 4 filter. Only ever append.
+    static const QStringList kBuiltinIds = {
+            QString(),
+            QStringLiteral("org.mixxx.effects.filter"),
+            QStringLiteral("org.mixxx.effects.flanger"),
+            QStringLiteral("org.mixxx.effects.echo"),
+            QStringLiteral("org.mixxx.effects.reverb"),
+            QStringLiteral("org.mixxx.effects.phaser"),
+            QStringLiteral("org.mixxx.effects.bitcrusher"),
+            QStringLiteral("org.mixxx.effects.tremolo"),
+            QStringLiteral("org.mixxx.effects.autopan"),
+            QStringLiteral("org.mixxx.effects.distortion"),
+            QStringLiteral("org.mixxx.effects.moogladder4filter"),
+    };
+    const int number = static_cast<int>(value);
+    if (number < 1 || number >= kBuiltinIds.size()) {
+        return;
+    }
+    EffectManifestPointer pManifest =
+            m_pBackendManager->getManifest(kBuiltinIds.at(number), EffectBackendType::BuiltIn);
+    if (!pManifest) {
+        qWarning() << "load_builtin: no built-in effect" << kBuiltinIds.at(number);
+        return;
+    }
+    loadEffectWithDefaults(pManifest);
 }
 
 void EffectSlot::visibleEffectsListChanged() {
