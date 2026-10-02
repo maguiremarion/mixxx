@@ -35,6 +35,7 @@
 #include "broadcast/broadcastmanager.h"
 #endif
 #include "control/controlindicatortimer.h"
+#include "control/controlpushbutton.h"
 #include "library/library.h"
 #include "library/library_decl.h"
 #include "library/library_prefs.h"
@@ -327,6 +328,21 @@ void MixxxMainWindow::initialize() {
             &MixxxMainWindow::slotUpdateMenuBarAltKeyConnection,
             Qt::DirectConnection);
 #endif
+
+    // Skins and controllers have no other way to reach the Preferences dialog
+    // (it is only in the menu bar), so expose it as a control. This has to be
+    // created BEFORE the skin loads: a skin that references an unknown control
+    // creates its own toggle copy of it, after which this one can't be created.
+    m_pShowPreferences = std::make_unique<ControlPushButton>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("show_preferences")));
+    connect(m_pShowPreferences.get(),
+            &ControlPushButton::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0.0) {
+                    slotOptionsPreferences();
+                }
+            });
 
     // Connect signals to the menubar. Should be done before emit skinLoaded.
     connectMenuBar();
