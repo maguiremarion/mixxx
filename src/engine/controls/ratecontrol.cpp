@@ -142,6 +142,14 @@ RateControl::RateControl(const QString& group, UserSettingsPointer pConfig)
             &RateControl::slotRateRangeChanged,
             Qt::DirectConnection);
 
+    m_pRateRangeCycle = std::make_unique<ControlPushButton>(
+            ConfigKey(group, QStringLiteral("rate_range_cycle")));
+    connect(m_pRateRangeCycle.get(),
+            &ControlObject::valueChanged,
+            this,
+            &RateControl::slotRateRangeCycle,
+            Qt::DirectConnection);
+
     connect(m_pRateSlider.get(),
             &ControlObject::valueChanged,
             this,
@@ -288,6 +296,24 @@ double RateControl::getPermanentRateChangeFineAmount() {
 void RateControl::slotRateRangeChanged(double) {
     // update RateSlider with the new Range value butdo not change m_pRateRatio
     slotRateRatioChanged(m_pRateRatio->get());
+}
+
+void RateControl::slotRateRangeCycle(double v) {
+    if (v <= 0.0) {
+        return; // button release
+    }
+    // Changing the range keeps the playback rate: slotRateRangeChanged() only
+    // moves the slider, it does not touch m_pRateRatio.
+    static constexpr double kRanges[] = {0.06, 0.10, 0.16, 0.50};
+    const double current = m_pRateRange->get();
+    double next = kRanges[0]; // wrap around
+    for (const double range : kRanges) {
+        if (range > current + 1e-6) {
+            next = range;
+            break;
+        }
+    }
+    m_pRateRange->set(next);
 }
 
 void RateControl::slotRateSliderChanged(double v) {

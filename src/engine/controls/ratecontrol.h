@@ -81,6 +81,9 @@ public:
 
 public slots:
   void slotRateRangeChanged(double);
+  // [ChannelN],rate_range_cycle: step the tempo fader range through a short
+  // list (6, 10, 16, 50 %) and wrap around.
+  void slotRateRangeCycle(double);
   void slotRateSliderChanged(double);
   void slotRateRatioChanged(double);
   void slotReverseRollActivate(double);
@@ -115,6 +118,7 @@ private:
   std::unique_ptr<ControlObject> m_pRateRatio;
   std::unique_ptr<ControlObject> m_pRateDir;
   std::unique_ptr<ControlObject> m_pRateRange;
+  std::unique_ptr<ControlPushButton> m_pRateRangeCycle;
   std::unique_ptr<ControlPotmeter> m_pRateSlider;
   std::unique_ptr<ControlPotmeter> m_pRateSearch;
 
