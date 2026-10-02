@@ -3,8 +3,11 @@
 #include <QApplication>
 #include <QCursor>
 #include <QDrag>
-#include <QMenu>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QModelIndex>
+#include <QPushButton>
+#include <QScreen>
 #include <QScrollBar>
 #include <QShortcut>
 #include <QStylePainter>
@@ -451,9 +454,14 @@ void WTrackTableView::showLoadPopup() {
     if (!isVisible() || getSelectedRows().isEmpty()) {
         return;
     }
-    auto* pMenu = new QMenu(this);
-    pMenu->setObjectName(QStringLiteral("LoadPopup"));
-    pMenu->setAttribute(Qt::WA_DeleteOnClose);
+    // Qt::Popup: closes itself when you click anywhere outside it.
+    auto* pPopup = new QFrame(this, Qt::Popup);
+    pPopup->setObjectName(QStringLiteral("LoadPopup"));
+    pPopup->setAttribute(Qt::WA_DeleteOnClose);
+    pPopup->setAttribute(Qt::WA_StyledBackground);
+    auto* pLayout = new QHBoxLayout(pPopup);
+    pLayout->setContentsMargins(0, 0, 0, 0);
+    pLayout->setSpacing(0);
 
     // Decks 3/4 only when the skin is in 4-deck mode.
     const int numDecks =
@@ -463,8 +471,12 @@ void WTrackTableView::showLoadPopup() {
             : 2;
     for (int deck = 1; deck <= numDecks; ++deck) {
         const QString group = PlayerManager::groupForDeck(deck - 1);
-        QAction* pAction = pMenu->addAction(tr("Load %1").arg(deck));
-        connect(pAction, &QAction::triggered, this, [this, group]() {
+        auto* pButton = new QPushButton(tr("Load %1").arg(deck), pPopup);
+        pButton->setObjectName(QStringLiteral("LoadPopupButton"));
+        pButton->setFocusPolicy(Qt::NoFocus);
+        pLayout->addWidget(pButton);
+        connect(pButton, &QPushButton::clicked, this, [this, pPopup, group]() {
+            pPopup->close();
 #ifdef __STEM__
             loadSelectedTrackToGroup(group, mixxx::StemChannelSelection(), false);
 #else
@@ -472,7 +484,17 @@ void WTrackTableView::showLoadPopup() {
 #endif
         });
     }
-    pMenu->popup(QCursor::pos());
+
+    // Open at the cursor, nudged back on-screen if it would overflow.
+    pPopup->adjustSize();
+    QPoint pos = QCursor::pos();
+    if (const QScreen* pScreen = screen()) {
+        const QRect avail = pScreen->availableGeometry();
+        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
+    }
+    pPopup->move(pos);
+    pPopup->show();
 }
 
 // slot
