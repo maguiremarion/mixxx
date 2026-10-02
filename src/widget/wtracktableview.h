@@ -2,6 +2,7 @@
 
 #include <QAbstractItemModel>
 #include <QSortFilterProxyModel>
+#include <QTimer>
 
 #include "control/controlproxy.h"
 #include "control/pollingcontrolproxy.h"
@@ -160,6 +161,12 @@ class WTrackTableView : public WLibraryTableView {
     void slotRandomSorting();
     void keyNotationChanged();
 
+    // A plain left-click on a row offers a small "Load 1 / Load 2" popup.
+    // slotRowClicked() only arms a short timer so a double-click (which
+    // loads to the first free deck) can cancel it; showLoadPopup() opens it.
+    void slotRowClicked(const QModelIndex& index);
+    void showLoadPopup();
+
   protected:
     QString getModelStateKey() const override;
 
@@ -218,4 +225,6 @@ class WTrackTableView : public WLibraryTableView {
     ControlProxy* m_pSortOrder;
 
     int m_dropRow;
+
+    QTimer m_loadPopupTimer;
 };

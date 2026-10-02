@@ -1,6 +1,9 @@
 #include "widget/wtracktableview.h"
 
+#include <QApplication>
+#include <QCursor>
 #include <QDrag>
+#include <QMenu>
 #include <QModelIndex>
 #include <QScrollBar>
 #include <QShortcut>
@@ -60,6 +63,12 @@ WTrackTableView::WTrackTableView(QWidget* pParent,
           m_dropRow(-1) {
     // Connect slots and signals to make the world go 'round.
     connect(this, &WTrackTableView::doubleClicked, this, &WTrackTableView::slotMouseDoubleClicked);
+
+    // Single click -> "Load 1 / Load 2" popup (see slotRowClicked()).
+    m_loadPopupTimer.setSingleShot(true);
+    m_loadPopupTimer.setInterval(250);
+    connect(&m_loadPopupTimer, &QTimer::timeout, this, &WTrackTableView::showLoadPopup);
+    connect(this, &WTrackTableView::clicked, this, &WTrackTableView::slotRowClicked);
 
     m_pCOTGuiTick = new ControlProxy(QStringLiteral("[App]"),
             QStringLiteral("gui_tick_50ms_period_s"),
@@ -414,8 +423,63 @@ void WTrackTableView::initTrackMenu() {
             &WTrackTableView::slotrestoreCurrentIndex);
 }
 
+void WTrackTableView::slotRowClicked(const QModelIndex& index) {
+    // Only a plain click: Ctrl/Shift-click is for multi-selection.
+    if (QApplication::keyboardModifiers() != Qt::NoModifier) {
+        return;
+    }
+    auto* pTrackModel = getTrackModel();
+    if (!pTrackModel ||
+            !pTrackModel->hasCapabilities(TrackModel::Capability::LoadToDeck)) {
+        return;
+    }
+    // These cells have their own click action (preview button, color picker,
+    // rating stars), so don't pop anything up over them.
+    switch (pTrackModel->sortColumnIdFromColumnIndex(index.column())) {
+    case TrackModel::SortColumnId::Preview:
+    case TrackModel::SortColumnId::Color:
+    case TrackModel::SortColumnId::Rating:
+        return;
+    default:
+        break;
+    }
+    // Wait out a possible double-click; slotMouseDoubleClicked() cancels this.
+    m_loadPopupTimer.start();
+}
+
+void WTrackTableView::showLoadPopup() {
+    if (!isVisible() || getSelectedRows().isEmpty()) {
+        return;
+    }
+    auto* pMenu = new QMenu(this);
+    pMenu->setObjectName(QStringLiteral("LoadPopup"));
+    pMenu->setAttribute(Qt::WA_DeleteOnClose);
+
+    // Decks 3/4 only when the skin is in 4-deck mode.
+    const int numDecks =
+            ControlObject::get(ConfigKey(QStringLiteral("[Skin]"),
+                    QStringLiteral("show_4decks"))) > 0.0
+            ? 4
+            : 2;
+    for (int deck = 1; deck <= numDecks; ++deck) {
+        const QString group = PlayerManager::groupForDeck(deck - 1);
+        QAction* pAction = pMenu->addAction(tr("Load %1").arg(deck));
+        connect(pAction, &QAction::triggered, this, [this, group]() {
+#ifdef __STEM__
+            loadSelectedTrackToGroup(group, mixxx::StemChannelSelection(), false);
+#else
+            loadSelectedTrackToGroup(group, false);
+#endif
+        });
+    }
+    pMenu->popup(QCursor::pos());
+}
+
 // slot
 void WTrackTableView::slotMouseDoubleClicked(const QModelIndex& index) {
+    // A double-click loads straight to a deck, so no popup for it.
+    m_loadPopupTimer.stop();
+
     // Read the current TrackDoubleClickAction setting
     // TODO simplify this casting madness
     int doubleClickActionConfigValue =
