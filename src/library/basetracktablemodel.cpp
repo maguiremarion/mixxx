@@ -932,11 +932,12 @@ QVariant BaseTrackTableModel::roleValue(
             return Qt::PartiallyChecked;
         }
     }
-    // Right align BPM, duration and bitrate so big/small values can easily be
+    // Right align BPM, key, duration and bitrate so big/small values can easily be
     // spotted by length (number of digits)
     case Qt::TextAlignmentRole: {
         switch (field) {
         case ColumnCache::COLUMN_LIBRARYTABLE_BPM:
+        case ColumnCache::COLUMN_LIBRARYTABLE_KEY:
         case ColumnCache::COLUMN_LIBRARYTABLE_DURATION:
         case ColumnCache::COLUMN_LIBRARYTABLE_BITRATE:
         case ColumnCache::COLUMN_LIBRARYTABLE_TRACKNUMBER:

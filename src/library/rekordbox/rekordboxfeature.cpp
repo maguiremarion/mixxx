@@ -1363,16 +1363,17 @@ CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
 }
 
 QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
-    // Cover art, then the things you pick a track by. Widths add up to about the 760 px the
-    // list gets next to the sidebar on a 1024 px wide screen; everything else is hidden
-    // (it can be turned back on from the header's right-click menu).
+    // Cover art, then the things you pick a track by, then the preview button. Widths add up
+    // to about the 790 px the list gets next to the sidebar on a 1024 px wide screen;
+    // everything else is hidden (turn it back on from the header's right-click menu).
     return {
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 56},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 300},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 200},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 66},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 60},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 76},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 43},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 290},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 165},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 85},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 50},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 94},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_PREVIEW), 62},
     };
 }
 
