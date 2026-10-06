@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QOpenGLContext>
+#include <QProcess>
 #include <QTimer>
 #include <QUrl>
 
@@ -345,6 +346,43 @@ void MixxxMainWindow::initialize() {
                     slotOptionsPreferences();
                 }
             });
+
+    // [App],restart: also created before the skin loads (same rule as above).
+    // close() runs the usual exit checks (confirmExit); only if the app really quits
+    // (aboutToQuit) do we start the new copy. A refused exit clears the request.
+    m_pRestartApp = std::make_unique<ControlPushButton>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("restart")));
+    connect(m_pRestartApp.get(),
+            &ControlPushButton::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0.0) {
+                    m_restartRequested = true;
+                    close();
+                }
+            });
+    connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
+        if (!m_restartRequested) {
+            return;
+        }
+        QStringList args = QCoreApplication::arguments().mid(1);
+#ifdef Q_OS_WIN
+        QProcess::startDetached(QCoreApplication::applicationFilePath(), args);
+#else
+        // A helper shell waits until this process has exited (it holds Mixxx's single
+        // instance lock until then), then replaces itself with the new Mixxx.
+        QStringList shellArgs{
+                QStringLiteral("-c"),
+                QStringLiteral("pid=$1; shift; "
+                               "while kill -0 \"$pid\" 2>/dev/null; do sleep 0.3; done; "
+                               "exec \"$@\""),
+                QStringLiteral("sh"),
+                QString::number(QCoreApplication::applicationPid()),
+                QCoreApplication::applicationFilePath()};
+        shellArgs += args;
+        QProcess::startDetached(QStringLiteral("/bin/sh"), shellArgs);
+#endif
+    });
 
     // Library > Rescan Library (Ctrl+Shift+L) as controls, so a skin button can
     // start it and show progress. Same rule as above: create them BEFORE the
@@ -1613,6 +1651,7 @@ void MixxxMainWindow::closeEvent(QCloseEvent *event) {
     // initialized. This is because we call QApplication::processEvents to
     // render LaunchImage progress in the constructor.
     if (!confirmExit()) {
+        m_restartRequested = false; // exit refused, so no restart either
         event->ignore();
         return;
     }

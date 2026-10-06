@@ -41,4 +41,6 @@ BPMDelegate::BPMDelegate(QTableView* pTableView)
     m_pFactory->registerEditor(QVariant::Double, new BpmEditorCreator());
 #endif
     setItemEditorFactory(m_pFactory);
+    // The BPM lock checkbox only used up room in the column on a small screen.
+    setIndicatorHidden(true);
 }

@@ -5,6 +5,14 @@
 #include <rekordbox_pdb.h>
 
 #include <QDir>
+#include <QSvgRenderer>
+#include <QIcon>
+#include <QTableView>
+#include <QPainter>
+#include <typeinfo>
+#include <QThread>
+#include <QTimer>
+#include <QPointer>
 #include <QMap>
 #include <QMessageBox>
 #include <QSettings>
@@ -16,6 +24,7 @@
 #include "engine/engine.h"
 #include "library/coverartutils.h"
 #include "library/dao/trackschema.h"
+#include "library/tabledelegates/tableitemdelegate.h"
 #include "library/library.h"
 #include "library/queryutil.h"
 #include "library/rekordbox/rekordboxconstants.h"
@@ -118,7 +127,9 @@ bool createLibraryTable(QSqlDatabase& database, const QString& tableName) {
             "    color INTEGER,"
             // Always NULL: only here so the model has a Cover Art column (the images
             // come from RekordboxPlaylistModel::getCoverInfo()).
-            "    coverart BLOB"
+            "    coverart BLOB,"
+            // Also always NULL: gives the model an Overview column (see previewWaveform()).
+            "    wavesummaryhex BLOB"
             ");");
 
     if (!query.exec()) {
@@ -455,9 +466,14 @@ void buildPlaylistTree(
         const QString& playlistPath,
         const QString& device);
 
-QString parseDeviceDB(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* deviceItem) {
-    QString device = deviceItem->getLabel();
-    QString devicePath = deviceItem->getData().toList().at(0).toString();
+// `device` and `devicePath` are copies taken on the main thread before this runs: reading them
+// from deviceItem here raced with activateChild() rewriting the item's data right after it
+// started this thread, and could see an empty path (so nothing was imported and the drive
+// stayed blank until Mixxx was restarted).
+QString parseDeviceDBImpl(mixxx::DbConnectionPoolPtr dbConnectionPool,
+        TreeItem* deviceItem,
+        QString device,
+        QString devicePath) {
 
     qDebug() << "parseDeviceDB device: " << device << " devicePath: " << devicePath;
 
@@ -666,6 +682,25 @@ QString parseDeviceDB(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dev
     transaction.commit();
 
     return devicePath;
+}
+
+// Same as parseDeviceDBImpl, but says WHAT failed: QtConcurrent turns any exception thrown here
+// into a bare "std::exception" by the time onTracksFound() sees it.
+QString parseDeviceDB(mixxx::DbConnectionPoolPtr dbConnectionPool,
+        TreeItem* deviceItem,
+        QString device,
+        QString devicePath) {
+    try {
+        return parseDeviceDBImpl(std::move(dbConnectionPool), deviceItem, device, devicePath);
+    } catch (const std::exception& e) {
+        qWarning() << "Rekordbox: reading the database of" << device << "failed:"
+                   << typeid(e).name() << e.what();
+        throw;
+    } catch (...) {
+        qWarning() << "Rekordbox: reading the database of" << device
+                   << "failed with an unknown exception";
+        throw;
+    }
 }
 
 void buildPlaylistTree(
@@ -1144,6 +1179,8 @@ RekordboxPlaylistModel::RekordboxPlaylistModel(QObject* parent,
                   kRekordboxPlaylistsTable,
                   kRekordboxPlaylistTracksTable,
                   trackSource) {
+    m_coverLookupPool.setMaxThreadCount(1);
+    m_coverLookupPool.setThreadPriority(QThread::LowPriority);
 }
 
 void RekordboxPlaylistModel::initSortColumnMapping() {
@@ -1337,6 +1374,140 @@ TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
     return track;
 }
 
+namespace {
+
+// Reads the preview waveform ("PWAV": 400 bytes, per byte the low 5 bits are the height and
+// the high 3 bits how white that column is) out of a Rekordbox ANLZ .DAT file.
+QByteArray readPreviewWaveform(const QString& anlzPath) {
+    if (anlzPath.isEmpty() || !QFile::exists(anlzPath)) {
+        return QByteArray();
+    }
+    try {
+        std::ifstream ifs(anlzPath.toStdString(), std::ifstream::binary);
+        kaitai::kstream ks(&ifs);
+        rekordbox_anlz_t anlz = rekordbox_anlz_t(&ks);
+        for (const auto& section : *anlz.sections()) {
+            if (section->fourcc() == rekordbox_anlz_t::SECTION_TAGS_WAVE_PREVIEW) {
+                auto* pTag = static_cast<rekordbox_anlz_t::wave_preview_tag_t*>(section->body());
+                const std::string data = pTag->data();
+                return QByteArray(data.data(), static_cast<qsizetype>(data.size()));
+            }
+        }
+    } catch (...) {
+        // unreadable analysis file: the track just shows no overview
+    }
+    return QByteArray();
+}
+
+// Draws the Rekordbox preview waveform as a mirrored bar graph, blue fading to white.
+class RekordboxOverviewDelegate : public TableItemDelegate {
+  public:
+    RekordboxOverviewDelegate(QTableView* pTableView, const RekordboxPlaylistModel* pModel)
+            : TableItemDelegate(pTableView),
+              m_pModel(pModel) {
+    }
+
+    void paintItem(QPainter* painter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override {
+        paintItemBackground(painter, option, index);
+        if (!m_pModel) {
+            return;
+        }
+        const QByteArray data = m_pModel->previewWaveform(index);
+        if (data.isEmpty()) {
+            return;
+        }
+        const QRect area = option.rect.adjusted(2, 4, -2, -4);
+        if (area.width() <= 0 || area.height() <= 0) {
+            return;
+        }
+        painter->save();
+        const double middle = area.top() + area.height() / 2.0;
+        const double halfHeight = area.height() / 2.0;
+        const int count = static_cast<int>(data.size());
+        for (int x = 0; x < area.width(); ++x) {
+            const int i = std::min(count - 1, x * count / area.width());
+            const auto value = static_cast<quint8>(data.at(i));
+            const double amplitude = (value & 0x1F) / 31.0 * halfHeight;
+            const double white = (value >> 5) / 7.0;
+            const QColor color(static_cast<int>(40 + 215 * white),
+                    static_cast<int>(100 + 155 * white),
+                    static_cast<int>(230 + 25 * white));
+            painter->setPen(color);
+            painter->drawLine(QLineF(area.left() + x + 0.5,
+                    middle - amplitude,
+                    area.left() + x + 0.5,
+                    middle + amplitude));
+        }
+        painter->restore();
+    }
+
+  private:
+    QPointer<const RekordboxPlaylistModel> m_pModel;
+};
+
+} // namespace
+
+QAbstractItemDelegate* RekordboxPlaylistModel::delegateForColumn(
+        const int index, QObject* pParent) {
+    if (index == fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX)) {
+        auto* pTableView = qobject_cast<QTableView*>(pParent);
+        if (pTableView) {
+            return new RekordboxOverviewDelegate(pTableView, this);
+        }
+    }
+    return BaseExternalPlaylistModel::delegateForColumn(index, pParent);
+}
+
+QByteArray RekordboxPlaylistModel::previewWaveform(const QModelIndex& index) const {
+    const QString anlzPath =
+            getFieldVariant(index, ColumnCache::COLUMN_REKORDBOX_ANALYZE_PATH).toString();
+    if (anlzPath.isEmpty()) {
+        return QByteArray();
+    }
+    const auto cached = m_previewByAnlzPath.constFind(anlzPath);
+    if (cached != m_previewByAnlzPath.constEnd()) {
+        return cached.value();
+    }
+    if (m_previewLookupStarted.contains(anlzPath)) {
+        return QByteArray(); // being read
+    }
+    m_previewLookupStarted.insert(anlzPath);
+
+    QPointer<RekordboxPlaylistModel> self(const_cast<RekordboxPlaylistModel*>(this));
+    (void)QtConcurrent::run(&m_coverLookupPool, [self, anlzPath]() {
+        const QByteArray preview = readPreviewWaveform(anlzPath);
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+                self.data(),
+                [self, anlzPath, preview]() {
+                    if (!self) {
+                        return;
+                    }
+                    self->m_previewByAnlzPath.insert(anlzPath, preview);
+                    // One repaint of the column for a burst of results.
+                    if (self->m_previewRefreshQueued) {
+                        return;
+                    }
+                    self->m_previewRefreshQueued = true;
+                    QTimer::singleShot(150, self.data(), [self]() {
+                        self->m_previewRefreshQueued = false;
+                        const int column = self->fieldIndex(
+                                ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX);
+                        if (column >= 0 && self->rowCount() > 0) {
+                            emit self->dataChanged(self->index(0, column),
+                                    self->index(self->rowCount() - 1, column));
+                        }
+                    });
+                },
+                Qt::QueuedConnection);
+    });
+    return QByteArray();
+}
+
 CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
     const QString location = QDir::fromNativeSeparators(getTrackLocation(index));
     if (location.isEmpty()) {
@@ -1346,34 +1517,69 @@ CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
     if (cached != m_coverInfoByLocation.constEnd()) {
         return cached.value();
     }
-
-    // Guess from the file itself, without adding it to the Mixxx library: a temporary
-    // track is never stored. Missing files and files without art give an empty CoverInfo,
-    // which is remembered too so the file isn't read again on every repaint.
-    CoverInfo coverInfo;
-    if (QFile::exists(location)) {
-        TrackPointer pTrack = Track::newTemporary(location);
-        if (pTrack) {
-            pTrack->setAlbum(getFieldString(index, ColumnCache::COLUMN_LIBRARYTABLE_ALBUM));
-            coverInfo = CoverInfo(CoverInfoGuesser().guessCoverInfoForTrack(pTrack), location);
-        }
+    if (m_coverLookupStarted.contains(location)) {
+        return CoverInfo(); // being looked up
     }
-    m_coverInfoByLocation.insert(location, coverInfo);
-    return coverInfo;
+    m_coverLookupStarted.insert(location);
+
+    // Guess from the file itself on the worker thread, without adding it to the Mixxx
+    // library or creating Track objects (only plain file/tag/image functions are used).
+    // Missing files and files without art give an empty CoverInfo, which is remembered
+    // too so the file isn't read again.
+    const QString album = getFieldString(index, ColumnCache::COLUMN_LIBRARYTABLE_ALBUM);
+    QPointer<RekordboxPlaylistModel> self(const_cast<RekordboxPlaylistModel*>(this));
+    (void)QtConcurrent::run(&m_coverLookupPool, [self, location, album]() {
+        CoverInfo coverInfo;
+        if (QFile::exists(location)) {
+            const mixxx::FileInfo fileInfo(location);
+            const QImage embeddedCover =
+                    CoverArtUtils::extractEmbeddedCover(mixxx::FileAccess(fileInfo));
+            coverInfo = CoverInfo(
+                    CoverInfoGuesser().guessCoverInfo(fileInfo, album, embeddedCover),
+                    location);
+        }
+        if (!self) {
+            return;
+        }
+        QMetaObject::invokeMethod(
+                self.data(),
+                [self, location, coverInfo]() {
+                    if (!self) {
+                        return;
+                    }
+                    self->m_coverInfoByLocation.insert(location, coverInfo);
+                    // Repaint the Cover Art column once for a burst of results.
+                    if (self->m_coverRefreshQueued) {
+                        return;
+                    }
+                    self->m_coverRefreshQueued = true;
+                    QTimer::singleShot(150, self.data(), [self]() {
+                        self->m_coverRefreshQueued = false;
+                        const int column = self->fieldIndex(
+                                ColumnCache::COLUMN_LIBRARYTABLE_COVERART);
+                        if (column >= 0 && self->rowCount() > 0) {
+                            emit self->dataChanged(self->index(0, column),
+                                    self->index(self->rowCount() - 1, column));
+                        }
+                    });
+                },
+                Qt::QueuedConnection);
+    });
+    return CoverInfo();
 }
 
 QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
-    // Cover art, then the things you pick a track by, then the preview button. Widths add up
-    // to about the 790 px the list gets next to the sidebar on a 1024 px wide screen;
-    // everything else is hidden (turn it back on from the header's right-click menu).
+    // Cover art, then the things you pick a track by, then the overview waveform. Widths add up
+    // to about the 830 px the list gets on a 1024 px wide screen; everything else is hidden
+    // (turn it back on from the header's right-click menu).
     return {
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 43},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 290},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 165},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 85},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 272},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 146},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 71},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 50},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 94},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_PREVIEW), 62},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 83},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 162},
     };
 }
 
@@ -1413,6 +1619,7 @@ RekordboxFeature::RekordboxFeature(
             LIBRARYTABLE_KEY,
             LIBRARYTABLE_COLOR,
             LIBRARYTABLE_COVERART,
+            LIBRARYTABLE_WAVESUMMARYHEX,
             REKORDBOX_ANALYZE_PATH};
 
     const QStringList searchColumns = {
@@ -1520,44 +1727,19 @@ TreeItemModel* RekordboxFeature::sidebarModel() const {
 }
 
 QString RekordboxFeature::formatRootViewHtml() const {
-    QString title = tr("Rekordbox");
-    QString summary = tr(
-            "Reads databases exported for Pioneer CDJ / XDJ players using "
-            "the Rekordbox Export mode.<br/>"
-            "Rekordbox can only export to USB or SD devices with a FAT or "
-            "HFS file system.<br/>"
-            "Mixxx can read a database from any device that contains the "
-            "database folders (<tt>PIONEER</tt> and <tt>Contents</tt>).<br/>"
-            "Not supported are Rekordbox databases that have been moved to "
-            "an external device via<br/>"
-            "<i>Preferences > Advanced > Database management</i>.<br/>"
-            "<br/>"
-            "The following data is read:");
-
-    QStringList items;
-
-    items
-            << tr("Folders")
-            << tr("Playlists")
-            << tr("Beatgrids")
-            << tr("Hot cues")
-            << tr("Memory cues")
-            << tr("Loops (only the first loop is currently usable in Mixxx)");
+    // Kept short on purpose: this page is read on a small touchscreen. The link is large so it
+    // can be tapped.
+    const QString title = tr("Rekordbox");
+    const QString summary = tr("Mounted Rekordbox-formatted drives will show here.");
+    const QString refreshLink = tr("Rescan USB drives");
 
     QString html;
-    QString refreshLink = tr("Check for attached Rekordbox USB / SD devices (refresh)");
     html.append(QString("<h2>%1</h2>").arg(title));
-    html.append(QString("<p>%1</p>").arg(summary));
-    html.append(QString("<ul>"));
-    for (const auto& item : std::as_const(items)) {
-        html.append(QString("<li>%1</li>").arg(item));
-    }
-    html.append(QString("</ul>"));
-
-    //Colorize links in lighter blue, instead of QT default dark blue.
-    //Links are still different from regular text, but readable on dark/light backgrounds.
-    //https://github.com/mixxxdj/mixxx/issues/9103
-    html.append(QString("<a style=\"color:#0496FF;\" href=\"refresh\">%1</a>")
+    html.append(QString("<p style=\"font-size:20px;\">%1</p>").arg(summary));
+    // Colorize links in lighter blue, instead of QT default dark blue.
+    // Links are still different from regular text, but readable on dark/light backgrounds.
+    // https://github.com/mixxxdj/mixxx/issues/9103
+    html.append(QString("<p><a style=\"color:#0496FF; font-size:22px;\" href=\"refresh\">%1</a></p>")
                         .arg(refreshLink));
     return html;
 }
@@ -1608,7 +1790,11 @@ void RekordboxFeature::activateChild(const QModelIndex& index) {
         qDebug() << "Parse Rekordbox Device DB: " << playlist;
 
         // Let a worker thread do the XML parsing
-        m_tracksFuture = QtConcurrent::run(parseDeviceDB, static_cast<Library*>(parent())->dbConnectionPool(), item);
+        m_tracksFuture = QtConcurrent::run(parseDeviceDB,
+                static_cast<Library*>(parent())->dbConnectionPool(),
+                item,
+                item->getLabel(),
+                playlist);
         m_tracksFutureWatcher.setFuture(m_tracksFuture);
 
         // This device is now a playlist element, future activations should treat is
@@ -1621,6 +1807,30 @@ void RekordboxFeature::activateChild(const QModelIndex& index) {
         emit showTrackModel(m_pRekordboxPlaylistModel);
     }
 }
+
+namespace {
+
+// A small USB stick, drawn from inline SVG so it needs no resource file. Must be called on the
+// GUI thread (it makes a QPixmap).
+QIcon usbDriveIcon() {
+    static const QByteArray kSvg = QByteArrayLiteral(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            "<rect fill='#ff6600' x='7' y='1' width='10' height='8'/>"
+            "<rect fill='#181818' x='9.2' y='3' width='1.8' height='3.2'/>"
+            "<rect fill='#181818' x='13' y='3' width='1.8' height='3.2'/>"
+            "<rect fill='#ff6600' x='5' y='9' width='14' height='14' rx='2.5'/>"
+            "<rect fill='#181818' x='9' y='13' width='6' height='2' rx='1'/>"
+            "</svg>");
+    QSvgRenderer renderer(kSvg);
+    QPixmap pixmap(96, 96);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    renderer.render(&painter);
+    painter.end();
+    return QIcon(pixmap);
+}
+
+} // namespace
 
 void RekordboxFeature::onRekordboxDevicesFound() {
     const QList<TreeItem*> result = m_devicesFuture.result();
@@ -1684,6 +1894,7 @@ void RekordboxFeature::onRekordboxDevicesFound() {
             }
 
             if (addNewChild) {
+                pDeviceFound->setIcon(usbDriveIcon());
                 childrenToAdd.push_back(std::move(pDeviceFound));
             }
         }

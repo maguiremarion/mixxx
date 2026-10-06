@@ -26,6 +26,8 @@
 
 #include <QFuture>
 #include <QHash>
+#include <QSet>
+#include <QThreadPool>
 #include <QFutureWatcher>
 #include <QStringListModel>
 #include <QtConcurrentRun>
@@ -53,16 +55,30 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
     /// What a fresh install shows in the Rekordbox view (sized for a 1024x600 screen).
     QList<QPair<int, int>> defaultColumnLayout() const override;
     /// Rekordbox tracks aren't in Mixxx's library, so there is no stored cover art for
-    /// them. Work it out from the file (embedded art, or an image in its folder) the first
-    /// time a row is drawn and remember it.
+    /// them. It is worked out from the file (embedded art, or an image in its folder) on a
+    /// background thread the first time a row is drawn: until it is ready this returns no
+    /// cover, then the Cover Art column repaints. Results are remembered.
     CoverInfo getCoverInfo(const QModelIndex& index) const override;
+    /// The Overview column: Rekordbox's own 400 point preview waveform (from the track's ANLZ
+    /// analysis file), read on a background thread the first time a row is drawn. Empty until
+    /// it is ready (or if the track has none); the column repaints when it arrives.
+    QByteArray previewWaveform(const QModelIndex& index) const;
+    QAbstractItemDelegate* delegateForColumn(const int index, QObject* pParent) override;
 
   protected:
     void initSortColumnMapping() override;
 
   private:
     mutable QHash<QString, CoverInfo> m_coverInfoByLocation;
-};
+    // Locations whose cover is being looked up (or already was).
+    mutable QSet<QString> m_coverLookupStarted;
+    // One low-priority worker: lookups read tags off the USB stick one at a time and
+    // leave the CPU to the UI.
+    mutable QThreadPool m_coverLookupPool;
+    bool m_coverRefreshQueued = false;
+    mutable QHash<QString, QByteArray> m_previewByAnlzPath;
+    mutable QSet<QString> m_previewLookupStarted;
+    bool m_previewRefreshQueued = false;};
 
 class RekordboxFeature : public BaseExternalLibraryFeature {
     Q_OBJECT

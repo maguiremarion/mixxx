@@ -43,6 +43,40 @@ WLibrarySidebar::WLibrarySidebar(QWidget* parent)
     scrollerProps.setScrollMetric(QScrollerProperties::HorizontalOvershootPolicy,
             QScrollerProperties::OvershootAlwaysOff);
     QScroller::scroller(viewport())->setScrollerProperties(scrollerProps);
+
+    // One tap on an entry toggles it open/shut: a double click is too hard on a touchscreen.
+    // The default "double click toggles" would fight with this, so it is off. An entry whose
+    // children don't exist yet (Rekordbox finds its drives after the tap) opens as soon as they
+    // appear.
+    setExpandsOnDoubleClick(false);
+    connect(this, &QAbstractItemView::clicked, this, [this](const QModelIndex& index) {
+        if (!index.isValid()) {
+            return;
+        }
+        if (isExpanded(index)) {
+            collapse(index);
+        } else if (model()->hasChildren(index)) {
+            expand(index);
+        } else {
+            m_expandWhenChildrenAppear = index;
+        }
+    });
+}
+
+void WLibrarySidebar::rowsInserted(const QModelIndex& parent, int start, int end) {
+    QTreeView::rowsInserted(parent, start, end);
+    if (parent.isValid() && m_expandWhenChildrenAppear.isValid() &&
+            parent == QModelIndex(m_expandWhenChildrenAppear)) {
+        m_expandWhenChildrenAppear = QModelIndex();
+        expand(parent);
+    }
+}
+
+void WLibrarySidebar::setFeatureIconSize(int size) {
+    m_featureIconSize = size;
+    if (size > 0) {
+        setIconSize(QSize(size, size));
+    }
 }
 
 void WLibrarySidebar::contextMenuEvent(QContextMenuEvent* pEvent) {
@@ -506,7 +540,9 @@ bool WLibrarySidebar::event(QEvent* pEvent) {
 void WLibrarySidebar::slotSetFont(const QFont& font) {
     setFont(font);
     // Resize the feature icons to be a bit taller than the label's capital
-    int iconSize = static_cast<int>(QFontMetrics(font).height() * 0.8);
+    int iconSize = m_featureIconSize > 0
+            ? m_featureIconSize
+            : static_cast<int>(QFontMetrics(font).height() * 0.8);
     setIconSize(QSize(iconSize, iconSize));
 }
 

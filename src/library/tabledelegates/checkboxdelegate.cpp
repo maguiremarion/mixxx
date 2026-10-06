@@ -54,6 +54,9 @@ void CheckboxDelegate::paintItem(QPainter* painter,
 
     QStyleOptionViewItem opt = option;
     initStyleOption(&opt, index);
+    if (m_indicatorHidden) {
+        opt.features &= ~QStyleOptionViewItem::HasCheckIndicator;
+    }
 
     // The checkbox uses the QTableView's qss style, therefore it's not picking
     // up the 'missing' or 'played' text color via ForegroundRole from

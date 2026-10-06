@@ -233,6 +233,8 @@ Library::Library(
         }
     }
 
+    buildSidebar();
+
     // On startup we need to check if all of the user's library folders are
     // accessible to us. If the user is using a database from <1.12.0 with
     // sandboxing then we will need them to give us permission.
@@ -492,41 +494,90 @@ void Library::bindLibraryWidget(
     emit setSelectedClick(m_editMetadataSelectedClick);
 }
 
+// [Library],SidebarOrder: comma-separated entries to show in the sidebar, in this order
+// (tracks, computer, recordings, history, rekordbox, serato, autodj, playlists, crates, analyze,
+// itunes). Entries that aren't listed are left out. This fork's default is
+// "rekordbox,serato,tracks,computer,recordings,history"; an empty value shows everything.
+// [Library],HiddenSidebarFeatures: entries to leave out on top of that, e.g. "history".
+// A hidden entry still exists and is fully wired up (Auto DJ, the track menus, ... keep
+// working), it is only not listed in the sidebar.
+void Library::buildSidebar() {
+    const QStringList order =
+            (m_pConfig->exists(ConfigKey(kConfigGroup, "SidebarOrder"))
+                            ? m_pConfig->getValueString(ConfigKey(kConfigGroup, "SidebarOrder"))
+                            : QStringLiteral("rekordbox,serato,tracks,computer,recordings,history"))
+                    .toLower()
+                    .split(QChar(','), Qt::SkipEmptyParts);
+    const QStringList hidden =
+            m_pConfig->getValueString(ConfigKey(kConfigGroup, "HiddenSidebarFeatures"))
+                    .toLower()
+                    .split(QChar(','), Qt::SkipEmptyParts);
+    auto isHidden = [&hidden](const QString& id) {
+        for (const QString& name : hidden) {
+            if (name.trimmed() == id) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    std::vector<LibraryFeature*> toAdd;
+    if (order.isEmpty()) {
+        for (const auto& candidate : std::as_const(m_sidebarCandidates)) {
+            if (candidate.second && !isHidden(candidate.first)) {
+                toAdd.push_back(candidate.second);
+            }
+        }
+    } else {
+        for (const QString& name : order) {
+            const QString id = name.trimmed();
+            for (const auto& candidate : std::as_const(m_sidebarCandidates)) {
+                if (candidate.second && !candidate.first.isEmpty() &&
+                        candidate.first == id && !isHidden(id)) {
+                    toAdd.push_back(candidate.second);
+                }
+            }
+        }
+    }
+    for (LibraryFeature* pFeature : toAdd) {
+        m_pSidebarModel->addLibraryFeature(pFeature);
+    }
+    m_sidebarCandidates.clear();
+}
+
 void Library::addFeature(LibraryFeature* feature) {
     VERIFY_OR_DEBUG_ASSERT(feature) {
         return;
     }
     m_features.push_back(feature);
 
-    // [Library],HiddenSidebarFeatures: comma-separated list of entries to leave out
-    // of the sidebar, e.g. "playlists,crates,analyze,itunes". A hidden feature still
-    // exists and is fully wired up (Auto DJ, the track menus, ... keep working),
-    // it is only not listed in the sidebar.
+    // Which sidebar entry this is (for HiddenSidebarFeatures / SidebarOrder). The sidebar itself
+    // is filled once every feature has been added: see buildSidebar().
     QString sidebarId;
-    if (feature == m_pPlaylistFeature.get()) {
+    if (feature == m_pMixxxLibraryFeature.get()) {
+        sidebarId = QStringLiteral("tracks");
+    } else if (feature == m_pBrowseFeature.get()) {
+        sidebarId = QStringLiteral("computer");
+    } else if (feature == m_pAutoDJFeature.get()) {
+        sidebarId = QStringLiteral("autodj");
+    } else if (feature == m_pPlaylistFeature.get()) {
         sidebarId = QStringLiteral("playlists");
     } else if (feature == m_pCrateFeature.get()) {
         sidebarId = QStringLiteral("crates");
     } else if (feature == m_pAnalysisFeature.get()) {
         sidebarId = QStringLiteral("analyze");
+    } else if (dynamic_cast<RecordingFeature*>(feature)) {
+        sidebarId = QStringLiteral("recordings");
+    } else if (dynamic_cast<SetlogFeature*>(feature)) {
+        sidebarId = QStringLiteral("history");
+    } else if (dynamic_cast<RekordboxFeature*>(feature)) {
+        sidebarId = QStringLiteral("rekordbox");
+    } else if (dynamic_cast<SeratoFeature*>(feature)) {
+        sidebarId = QStringLiteral("serato");
     } else if (dynamic_cast<ITunesFeature*>(feature)) {
         sidebarId = QStringLiteral("itunes");
     }
-    bool hiddenInSidebar = false;
-    if (!sidebarId.isEmpty()) {
-        const QStringList hidden =
-                m_pConfig->getValueString(ConfigKey(kConfigGroup, "HiddenSidebarFeatures"))
-                        .toLower()
-                        .split(QChar(','), Qt::SkipEmptyParts);
-        for (const QString& name : hidden) {
-            if (name.trimmed() == sidebarId) {
-                hiddenInSidebar = true;
-            }
-        }
-    }
-    if (!hiddenInSidebar) {
-        m_pSidebarModel->addLibraryFeature(feature);
-    }
+    m_sidebarCandidates.push_back({sidebarId, feature});
     connect(feature,
             &LibraryFeature::pasteFromSidebar,
             this,

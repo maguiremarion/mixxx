@@ -2,6 +2,7 @@
 
 #include <QFont>
 #include <QList>
+#include <QPair>
 #include <QObject>
 #include <QPointer>
 
@@ -73,6 +74,7 @@ class Library: public QObject {
                     KeyboardEventFilter* pKeyboard);
 
     void addFeature(LibraryFeature* feature);
+    void buildSidebar();
 
     /// Needed for exposing models to QML
     LibraryTableModel* trackTableModel() const;
@@ -195,6 +197,8 @@ class Library: public QObject {
     parented_ptr<LibraryControl> m_pLibraryControl;
 
     QList<LibraryFeature*> m_features;
+    // (sidebar id, feature) of every feature, until buildSidebar() decides what to list
+    QList<QPair<QString, LibraryFeature*>> m_sidebarCandidates;
     const static QString m_sTrackViewName;
     WLibrary* m_pLibraryWidget;
     parented_ptr<MixxxLibraryFeature> m_pMixxxLibraryFeature;

@@ -94,7 +94,7 @@ class BaseTrackTableModel : public QAbstractTableModel, public TrackModel {
 
     QAbstractItemDelegate* delegateForColumn(
             const int column,
-            QObject* pParent) final;
+            QObject* pParent) override;
 
     int fieldIndex(
             const QString& fieldName) const override {
