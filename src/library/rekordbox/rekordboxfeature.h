@@ -60,6 +60,7 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
     bool isColumnInternal(int column) override;
     /// What a fresh install shows in the Rekordbox view (sized for a 1024x600 screen).
     QList<QPair<int, int>> defaultColumnLayout() const override;
+    int defaultColumnLayoutVersion() const override;
     /// Rekordbox tracks aren't in Mixxx's library, so there is no stored cover art for
     /// them. It is worked out from the file (embedded art, or an image in its folder) on a
     /// background thread the first time a row is drawn: until it is ready this returns no
@@ -123,7 +124,6 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
     void onTracksFound();
 
   private slots:
-    void htmlLinkClicked(const QUrl& link);
 
   private:
     QString formatRootViewHtml() const;

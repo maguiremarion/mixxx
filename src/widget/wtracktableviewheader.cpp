@@ -9,6 +9,9 @@
 #include <QTextOption>
 #include <QWidgetAction>
 
+#include <QFontMetrics>
+#include <algorithm>
+
 #include "library/trackmodel.h"
 #include "moc_wtracktableviewheader.cpp"
 #include "util/math.h"
@@ -300,7 +303,14 @@ void WTrackTableViewHeader::restoreHeaderState() {
     }
 
     const QString headerStateString = pTrackModel->getModelSetting("header_state_pb");
-    if (headerStateString.isEmpty()) {
+    // A model whose default layout is versioned replaces an older saved layout once.
+    const int layoutVersion = pTrackModel->defaultColumnLayoutVersion();
+    const bool layoutOutdated = layoutVersion > 0 &&
+            pTrackModel->getModelSetting("header_layout_version").toInt() != layoutVersion;
+    if (layoutOutdated) {
+        loadDefaultHeaderState();
+        pTrackModel->setModelSetting("header_layout_version", QString::number(layoutVersion));
+    } else if (headerStateString.isEmpty()) {
         loadDefaultHeaderState();
     } else {
         // Load the previous header state (stored as serialized protobuf).
@@ -341,6 +351,9 @@ void WTrackTableViewHeader::loadDefaultHeaderState() {
             continue;
         }
         shown.insert(column);
+        if (isSectionHidden(column)) {
+            showSection(column);
+        }
         resizeSection(column, width);
         moveSection(visualIndex(column), position++);
     }
@@ -547,7 +560,24 @@ void WTrackTableViewHeader::paintSection(
     const QRect contentRect = style()->subElementRect(QStyle::SE_HeaderLabel, &opt, this);
     // Note: contentRect.height() is now actually equal to m_preferredHeight
 
-    { // Draw text. Use PainterScope, just in case...
+    const QString title =
+            model()->headerData(logicalIndex, orientation(), Qt::DisplayRole).toString();
+    const QFontMetrics fontMetrics(font());
+    const int textWidth = fontMetrics.horizontalAdvance(title);
+
+    // The sort arrow is small, in proportion to the text (it used to be as tall as the whole
+    // header), and sits at the right edge.
+    const bool showIndicator = isSortIndicatorShown() && sortIndicatorSection() == logicalIndex;
+    const int indicatorSize = std::max(7, fontMetrics.ascent() * 6 / 10);
+    const int indicatorGap = 6;
+    const int indicatorSpace = showIndicator ? indicatorSize + indicatorGap : 0;
+
+    // A label that doesn't fit completely is not drawn at all: a cut-off "Cov" or an arrow drawn
+    // over the text both look worse than a blank header (the full name is in its tooltip). The
+    // arrow gets its room first, because it says which column the list is sorted by.
+    const bool textFits = textWidth <= contentRect.width() - indicatorSpace;
+
+    if (textFits) { // Draw text. Use PainterScope, just in case...
         PainterScope painterScope(pPainter);
 
         // BaseTrackTableModel::headerData(section, orientation, Qt::TextAlignmentRole)
@@ -558,23 +588,29 @@ void WTrackTableViewHeader::paintSection(
                                                 .value<Qt::Alignment>();
         QTextOption textOption(alignment);
         textOption.setWrapMode(QTextOption::NoWrap);
-        const QString title =
-                model()->headerData(logicalIndex, orientation(), Qt::DisplayRole).toString();
+        QRect textRect = contentRect;
+        if (layoutDirection() == Qt::LeftToRight) {
+            textRect.setRight(textRect.right() - indicatorSpace);
+        } else {
+            textRect.setLeft(textRect.left() + indicatorSpace);
+        }
         // QPainter still has the old font (size)
         pPainter->setFont(font());
         pPainter->setPen(opt.palette.color(QPalette::ButtonText));
-        pPainter->drawText(contentRect, title, textOption);
+        pPainter->drawText(textRect, title, textOption);
     }
 
     // Draw sort indicator if needed
-    if (isSortIndicatorShown() && sortIndicatorSection() == logicalIndex) {
-        // Use the style's original indicator rect but make width = height
-        const QRect origIndiRect = style()->subElementRect(QStyle::SE_HeaderArrow, &opt, this);
-        int indiWH = origIndiRect.height();
-        int indiRectLeft = layoutDirection() == Qt::LeftToRight
-                ? origIndiRect.right() - indiWH
-                : origIndiRect.left();
-        opt.rect = QRect(indiRectLeft, origIndiRect.top(), indiWH, indiWH);
+    if (showIndicator) {
+        const int indicatorLeft = layoutDirection() == Qt::LeftToRight
+                ? contentRect.right() - indicatorSize
+                : contentRect.left();
+        const int indicatorTop = contentRect.top() + (contentRect.height() - indicatorSize) / 2;
+        // In a column too narrow for both, the arrow takes the middle of it.
+        const int left = textFits
+                ? indicatorLeft
+                : contentRect.left() + (contentRect.width() - indicatorSize) / 2;
+        opt.rect = QRect(left, indicatorTop, indicatorSize, indicatorSize);
 
         // NOTE: Don't use drawPrimitive(PE_IndicatorHeaderArrow) because of its
         // platform-specific arrow flipping logic in QFusionStyle::drawPrimitive

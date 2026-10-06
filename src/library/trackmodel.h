@@ -165,6 +165,13 @@ class TrackModel {
     virtual QList<QPair<int, int>> defaultColumnLayout() const {
         return {};
     }
+    /// Version of defaultColumnLayout(). A saved column layout (from an earlier run, possibly on
+    /// another machine's copy of this build) is only kept while its version matches; when the
+    /// version changes the new default replaces it once. 0 = don't track (keep saved layouts).
+    /// Bump this whenever defaultColumnLayout() changes and should reach everyone.
+    virtual int defaultColumnLayoutVersion() const {
+        return 0;
+    }
     virtual const QList<int>& searchColumns() const { return m_emptyColumns; }
 
     virtual void removeTracks(const QModelIndexList& indices) {

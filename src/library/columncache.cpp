@@ -141,7 +141,7 @@ constexpr ColumnProperties kColumnPropertiesByEnum[] = {
                 QT_TRANSLATE_NOOP("BaseTrackTableModel", "Color"),
                 kDefaultColumnWidth / 2},
         DI(ColumnCache::COLUMN_LIBRARYTABLE_COVERART){&LIBRARYTABLE_COVERART,
-                QT_TRANSLATE_NOOP("BaseTrackTableModel", "Cover Art"),
+                QT_TRANSLATE_NOOP("BaseTrackTableModel", "Art"),
                 kDefaultColumnWidth / 2},
         DI(ColumnCache::COLUMN_LIBRARYTABLE_COVERART_SOURCE){&LIBRARYTABLE_COVERART_SOURCE,
                 nullptr,

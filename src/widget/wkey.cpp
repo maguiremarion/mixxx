@@ -22,9 +22,12 @@ const ConfigKey kShowCamelotKey(QStringLiteral("[Skin]"), QStringLiteral("key_sh
 // Creates the shared "show keys as 1A" toggle the first time a key label is built. It must exist
 // before the labels' proxies are made (a proxy to a missing control stays invalid).
 ConfigKey ensureShowCamelotControl() {
-    static std::unique_ptr<ControlPushButton> s_pShowCamelot;
+    // Deliberately never deleted. A static std::unique_ptr here was destroyed during process
+    // exit, long after Mixxx had torn down its control registry, and crashed (segfault on every
+    // quit). The OS reclaims the memory when the process ends.
+    static ControlPushButton* s_pShowCamelot = nullptr;
     if (!s_pShowCamelot) {
-        s_pShowCamelot = std::make_unique<ControlPushButton>(kShowCamelotKey, /*persist*/ true);
+        s_pShowCamelot = new ControlPushButton(kShowCamelotKey, /*persist*/ true);
         s_pShowCamelot->setButtonMode(mixxx::control::ButtonMode::Toggle);
     }
     return kShowCamelotKey;

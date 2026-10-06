@@ -50,13 +50,24 @@ void CheckboxDelegate::paintItem(QPainter* painter,
     // This however enables some default styles and clears the custom background
     // color (track color), see bug #12355 ¯\_(ツ)_/¯ Qt is fun!
     // Fix that by setting the bg color explicitly here.
+    if (m_indicatorHidden) {
+        // No checkbox / lock icon: paint the cell exactly like an ordinary text column, with the
+        // table's own style. The hidden-checkbox route below takes its colours from a different
+        // widget, which made this column's colour differ from its row.
+        QStyleOptionViewItem plainOpt = option;
+        initStyleOption(&plainOpt, index);
+        plainOpt.features &= ~QStyleOptionViewItem::HasCheckIndicator;
+        if (QStyle* pTableStyle = m_pTableView->style()) {
+            pTableStyle->drawControl(
+                    QStyle::CE_ItemViewItem, &plainOpt, painter, m_pTableView);
+        }
+        return;
+    }
+
     paintItemBackground(painter, option, index);
 
     QStyleOptionViewItem opt = option;
     initStyleOption(&opt, index);
-    if (m_indicatorHidden) {
-        opt.features &= ~QStyleOptionViewItem::HasCheckIndicator;
-    }
 
     // The checkbox uses the QTableView's qss style, therefore it's not picking
     // up the 'missing' or 'played' text color via ForegroundRole from

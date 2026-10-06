@@ -1,6 +1,9 @@
 #include "library/tabledelegates/keydelegate.h"
 
 #include <QPainter>
+#include <algorithm>
+
+#include <QPainter>
 #include <QStyle>
 #include <QTableView>
 
@@ -31,41 +34,7 @@ void KeyDelegate::paintItem(
     const QString keyText = index.data().value<QString>();
     const QVariantMap colorRect = index.data(Qt::DecorationRole).value<QVariantMap>();
     const double tuningFrequencyHz = index.data(TrackModel::kTuningFrequencyRole).toDouble();
-    int leftMargin = 0;
-
     const QColor colorTop = colorRect["top"].value<QColor>();
-    const double splitPoint = colorRect["splitPoint"].value<double>();
-
-    if (colorTop.isValid()) {
-        // Draw the colored rectangle next to the key label
-        constexpr int width = 4;
-        leftMargin = width + 4; // 4px right padding
-
-        const int x = option.rect.x();
-        constexpr int yPad = 2;
-        const int padTop = option.rect.y() + yPad;
-        const int padHeight = option.rect.height() - 2 * yPad;
-        // adding 0.5 to get the round int instead of floor int
-        const int splitHeight = static_cast<int>(padHeight * splitPoint + 0.5);
-
-        painter->fillRect(
-                x,
-                padTop,
-                width,
-                splitHeight,
-                colorTop);
-
-        // if this track has a tuning, draw the second color
-        if (splitPoint < 1) {
-            const QColor colorBottom = colorRect["bottom"].value<QColor>();
-            painter->fillRect(
-                    x,
-                    padTop + splitHeight,
-                    width,
-                    padHeight - splitHeight,
-                    colorBottom);
-        }
-    }
 
     // Determine which tuning symbol to show (if any)
     QString tuningSymbol;
@@ -84,14 +53,57 @@ void KeyDelegate::paintItem(
         symbolColor = QColor(255, 99, 71); // Tomato red
     }
 
-    // Reserve space for tuning symbol if needed
-    int rightMargin = !tuningSymbol.isEmpty() ? kTuningSymbolWidth : 0;
+    // Laid out from the right edge, like the key label in the deck sidebar: [text][colour square]
+    // with an optional tuning symbol at the very end. (It used to be a colour bar against the
+    // left edge and left-aligned text, which crowded the neighbouring column.)
+    constexpr int kPad = 8;
+    int right = option.rect.right() + 1 - kPad;
 
-    // Display the key text with the user-provided notation
-    QString elidedText = option.fontMetrics.elidedText(
-            keyText,
-            Qt::ElideRight,
-            columnWidth(index) - leftMargin - rightMargin);
+    if (!tuningSymbol.isEmpty()) {
+        painter->save();
+        if (option.state & QStyle::State_Selected) {
+            // Use a brighter color when selected
+            symbolColor = symbolColor.lighter(130);
+        }
+        painter->setPen(symbolColor);
+        QFont symbolFont = option.font;
+        symbolFont.setBold(true);
+        painter->setFont(symbolFont);
+        painter->drawText(
+                right - kTuningSymbolWidth,
+                option.rect.y(),
+                kTuningSymbolWidth,
+                option.rect.height(),
+                Qt::AlignVCenter | Qt::AlignRight,
+                tuningSymbol);
+        painter->restore();
+        right -= kTuningSymbolWidth;
+    }
+
+    if (colorTop.isValid()) {
+        // Pale rounded square in the key's colour (45 % of the way to white)
+        const QColor pale = QColor::fromRgbF(colorTop.redF() * 0.55 + 0.45,
+                colorTop.greenF() * 0.55 + 0.45,
+                colorTop.blueF() * 0.55 + 0.45);
+        const int squareSize = std::min(12, std::max(8, option.fontMetrics.height() / 2));
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(pale);
+        painter->drawRoundedRect(QRectF(right - squareSize,
+                                         option.rect.y() + (option.rect.height() - squareSize) / 2.0,
+                                         squareSize,
+                                         squareSize),
+                squareSize * 0.3,
+                squareSize * 0.3);
+        painter->restore();
+        right -= squareSize + 6;
+    }
+
+    // Display the key text with the user-provided notation, right-aligned
+    const int textLeft = option.rect.x() + kPad;
+    const int textWidth = std::max(0, right - textLeft);
+    QString elidedText = option.fontMetrics.elidedText(keyText, Qt::ElideRight, textWidth);
 
     // This is not picking up the 'missing' or 'played' text color via
     // ForegroundRole from BaseTrackTableModel::data().
@@ -104,33 +116,12 @@ void KeyDelegate::paintItem(
         painter->setPen(QPen(opt.palette.text().color()));
     }
 
-    painter->drawText(option.rect.x() + leftMargin,
+    painter->drawText(textLeft,
             option.rect.y(),
-            option.rect.width() - leftMargin - rightMargin,
+            textWidth,
             option.rect.height(),
-            Qt::AlignVCenter,
+            Qt::AlignVCenter | Qt::AlignRight,
             elidedText);
-
-    // Draw tuning indicator symbol
-    if (!tuningSymbol.isEmpty()) {
-        painter->save();
-        if (option.state & QStyle::State_Selected) {
-            // Use a brighter color when selected
-            symbolColor = symbolColor.lighter(130);
-        }
-        painter->setPen(symbolColor);
-        QFont symbolFont = option.font;
-        symbolFont.setBold(true);
-        painter->setFont(symbolFont);
-        painter->drawText(
-                option.rect.x() + option.rect.width() - kTuningSymbolWidth,
-                option.rect.y(),
-                kTuningSymbolWidth,
-                option.rect.height(),
-                Qt::AlignVCenter | Qt::AlignRight,
-                tuningSymbol);
-        painter->restore();
-    }
 
     // Draw a border if the key cell has focus
     if (option.state & QStyle::State_HasFocus) {

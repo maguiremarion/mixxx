@@ -705,6 +705,22 @@ void MixxxMainWindow::initializeWindow() {
                     ->getValueString(ConfigKey("[MainWindow]", "state"))
                     .toUtf8()));
 
+    // Dev convenience: MIXXX_WINDOW_SIZE=1024x600 forces that window (content) size at startup,
+    // whatever size was remembered, e.g. to see exactly what the Raspberry Pi's screen shows.
+    const QString forcedSize = QString::fromLocal8Bit(qgetenv("MIXXX_WINDOW_SIZE")).toLower();
+    const QStringList forcedSizeParts = forcedSize.split(QChar('x'));
+    if (forcedSizeParts.size() == 2) {
+        bool widthOk = false;
+        bool heightOk = false;
+        const int forcedWidth = forcedSizeParts.at(0).trimmed().toInt(&widthOk);
+        const int forcedHeight = forcedSizeParts.at(1).trimmed().toInt(&heightOk);
+        if (widthOk && heightOk && forcedWidth > 0 && forcedHeight > 0) {
+            // leave fullscreen / maximized first, or the size would be ignored
+            setWindowState(windowState() & ~(Qt::WindowFullScreen | Qt::WindowMaximized));
+            resize(forcedWidth, forcedHeight);
+        }
+    }
+
     setWindowIcon(QIcon(MIXXX_ICON_PATH));
     slotUpdateWindowTitle(TrackPointer());
 }

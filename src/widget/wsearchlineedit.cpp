@@ -296,12 +296,10 @@ void WSearchLineEdit::resizeEvent(QResizeEvent* e) {
     }
     int top = rect().top() + kBorderWidth;
     if (layoutDirection() == Qt::LeftToRight) {
-        m_clearButton->move(rect().right() -
-                        static_cast<int>(1.7 * innerHeight) - kBorderWidth,
-                top);
+        // flush with the right edge: there is no drop-down arrow to leave room for
+        m_clearButton->move(rect().right() - innerHeight - kBorderWidth + 1, top);
     } else {
-        m_clearButton->move(static_cast<int>(0.7 * innerHeight) + kBorderWidth,
-                top);
+        m_clearButton->move(kBorderWidth, top);
     }
 }
 
@@ -647,6 +645,12 @@ void WSearchLineEdit::refreshState() {
 }
 
 void WSearchLineEdit::showPopup() {
+    // The recent-searches list is not wanted on the touchscreen build: never open it (neither from
+    // the arrow, which the skin also hides, nor from the keyboard shortcuts).
+    return;
+}
+
+void WSearchLineEdit::showPopupOriginal() {
     int cIndex = findCurrentTextIndex();
     if (cIndex == -1) {
         slotSaveSearch();
@@ -711,7 +715,8 @@ void WSearchLineEdit::updateClearAndDropdownButton(const QString& text) {
     const QString clearPos(layoutDirection() == Qt::RightToLeft ? "left" : "right");
 
     // Hide the nonfunctional drop-down button (set width to 0) if the search is disabled.
-    const int dropDownWidth = isEnabled() ? static_cast<int>(innerHeight * 0.7) : 0;
+    // (Always, in this build: the recent-searches list is off, see showPopup().)
+    const int dropDownWidth = 0;
 
     const QString styleSheet = QStringLiteral(
             "WSearchLineEdit { padding-%1: %2px; }"

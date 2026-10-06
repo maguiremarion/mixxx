@@ -1,6 +1,8 @@
 #include "widget/wlibrarysidebar.h"
 
 #include <QHeaderView>
+#include <QPen>
+#include <QPainter>
 #include <QScroller>
 #include <QScrollerProperties>
 #include <QUrl>
@@ -28,9 +30,13 @@ WLibrarySidebar::WLibrarySidebar(QWidget* parent)
     setAcceptDrops(true);
     setAutoScroll(true);
     setAttribute(Qt::WA_MacShowFocusRect, false);
-    header()->setStretchLastSection(false);
-    header()->setSectionResizeMode(QHeaderView::ResizeToContents);
+    // One column exactly as wide as the sidebar: a name that is too long is cut off with "..."
+    // instead of making the sidebar scroll sideways.
+    header()->setStretchLastSection(true);
+    header()->setSectionResizeMode(QHeaderView::Stretch);
     header()->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setTextElideMode(Qt::ElideRight);
 
     // Finger scrolling, like the track table.
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -61,6 +67,54 @@ WLibrarySidebar::WLibrarySidebar(QWidget* parent)
             m_expandWhenChildrenAppear = index;
         }
     });
+}
+
+void WLibrarySidebar::drawBranches(
+        QPainter* pPainter, const QRect& rect, const QModelIndex& index) const {
+    // The arrows (or nothing) first, as usual.
+    QTreeView::drawBranches(pPainter, rect, index);
+
+    // Connector lines for children only: a vertical line down from the parent's arrow, with a
+    // short stub into each child, so it is obvious which entries belong to which. The top level
+    // entries are not joined to each other.
+    int depth = 0;
+    for (QModelIndex parent = index.parent(); parent.isValid(); parent = parent.parent()) {
+        ++depth;
+    }
+    if (depth == 0) {
+        return;
+    }
+
+    const int indent = indentation();
+    const int midY = rect.top() + rect.height() / 2;
+    const bool hasChildren = model()->hasChildren(index);
+
+    pPainter->save();
+    pPainter->setRenderHint(QPainter::Antialiasing, false);
+    pPainter->setPen(QPen(m_branchLineColor, 1));
+
+    // Walk up through the item and its ancestors: column c (0 = leftmost) holds the line of the
+    // children of the depth-c ancestor. It continues past this row when the entry on this
+    // branch at depth c + 1 has a following sibling.
+    QModelIndex branchEntry = index;
+    for (int column = depth - 1; column >= 0; --column) {
+        const int centerX = rect.left() + column * indent + indent / 2;
+        const bool hasNextSibling = branchEntry.siblingAtRow(branchEntry.row() + 1).isValid();
+        if (column == depth - 1) {
+            // This entry's own connector: down from the top to its middle (and on to the bottom
+            // if more siblings follow), then a stub into the entry.
+            pPainter->drawLine(centerX, rect.top(), centerX, hasNextSibling ? rect.bottom() : midY);
+            // The stub runs to the entry's text; if the entry has children of its own, its arrow
+            // sits in the next column, so stop at that column instead.
+            const int stubEnd = hasChildren ? rect.left() + depth * indent
+                                            : rect.left() + (depth + 1) * indent - 2;
+            pPainter->drawLine(centerX, midY, stubEnd, midY);
+        } else if (hasNextSibling) {
+            pPainter->drawLine(centerX, rect.top(), centerX, rect.bottom());
+        }
+        branchEntry = branchEntry.parent();
+    }
+    pPainter->restore();
 }
 
 void WLibrarySidebar::rowsInserted(const QModelIndex& parent, int start, int end) {

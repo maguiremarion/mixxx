@@ -1467,7 +1467,7 @@ QByteArray readPreviewWaveform(const QString& anlzPath) {
     return QByteArray();
 }
 
-// Draws the Rekordbox preview waveform as a mirrored bar graph, blue fading to white.
+// Draws the Rekordbox preview waveform as a mirrored bar graph, orange fading to white.
 class RekordboxOverviewDelegate : public TableItemDelegate {
   public:
     RekordboxOverviewDelegate(QTableView* pTableView, const RekordboxPlaylistModel* pModel)
@@ -1499,9 +1499,11 @@ class RekordboxOverviewDelegate : public TableItemDelegate {
             const auto value = static_cast<quint8>(data.at(i));
             const double amplitude = (value & 0x1F) / 31.0 * halfHeight;
             const double white = (value >> 5) / 7.0;
-            const QColor color(static_cast<int>(40 + 215 * white),
-                    static_cast<int>(100 + 155 * white),
-                    static_cast<int>(230 + 25 * white));
+            // orange, fading to white where Rekordbox marks the column "whiter" (it is blue in
+            // Rekordbox itself; orange here so it doesn't clash with the blue row highlight)
+            const QColor color(255,
+                    static_cast<int>(122 + 133 * white),
+                    static_cast<int>(26 + 229 * white));
             painter->setPen(color);
             painter->drawLine(QLineF(area.left() + x + 0.5,
                     middle - amplitude,
@@ -1637,18 +1639,25 @@ CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
 }
 
 QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
-    // Cover art, then the things you pick a track by, then the overview waveform. Widths add up
-    // to about the 830 px the list gets on a 1024 px wide screen; everything else is hidden
-    // (turn it back on from the header's right-click menu).
+    // The playlist position (#, sorted ascending by default for a playlist), cover art, then the
+    // things you pick a track by, then the overview waveform. The widths add up to 766 px: the
+    // width the table gets on a 1024 px wide screen (sidebar 230, scrollbar 28). Everything else
+    // is hidden (turn it back on from the header's right-click menu). Bump
+    // defaultColumnLayoutVersion() when changing this so it replaces saved layouts.
     return {
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 43},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 272},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 146},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 71},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 50},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 83},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 162},
+            {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 198},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 141},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 51},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 74},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 174},
     };
+}
+
+int RekordboxPlaylistModel::defaultColumnLayoutVersion() const {
+    return 1;
 }
 
 bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {
@@ -1759,8 +1768,6 @@ void RekordboxFeature::bindLibraryWidget(WLibrary* pLibraryWidget,
     Q_UNUSED(keyboard);
     parented_ptr<WLibraryTextBrowser> pEdit = make_parented<WLibraryTextBrowser>(pLibraryWidget);
     pEdit->setHtml(formatRootViewHtml());
-    pEdit->setOpenLinks(false);
-    connect(pEdit, &WLibraryTextBrowser::anchorClicked, this, &RekordboxFeature::htmlLinkClicked);
     pLibraryWidget->registerView("REKORDBOXHOME", pEdit);
 
     // Shown while a drive is being read (and if reading it failed).
@@ -1869,14 +1876,6 @@ void RekordboxFeature::startNextQueuedParse() {
     }
 }
 
-void RekordboxFeature::htmlLinkClicked(const QUrl& link) {
-    if (QString(link.path()) == "refresh") {
-        activate();
-    } else {
-        qDebug() << "Unknown link clicked" << link;
-    }
-}
-
 std::unique_ptr<BaseSqlTableModel>
 RekordboxFeature::createPlaylistModelForPlaylist(const QVariant& data) {
     VERIFY_OR_DEBUG_ASSERT(data.canConvert<QVariantList>()) {
@@ -1905,20 +1904,20 @@ TreeItemModel* RekordboxFeature::sidebarModel() const {
 }
 
 QString RekordboxFeature::formatRootViewHtml() const {
-    // Kept short on purpose: this page is read on a small touchscreen. The link is large so it
-    // can be tapped.
-    const QString title = tr("Rekordbox");
-    const QString summary = tr("Mounted Rekordbox-formatted drives will show here.");
-    const QString refreshLink = tr("Rescan USB drives");
+    // Short on purpose (small touchscreen). No "rescan" link: a drive that is plugged in or
+    // removed is picked up on its own within a few seconds, and tapping Rekordbox in the sidebar
+    // looks again as well.
+    const QString title = tr("Rekordbox Libraries");
+    const QString summary = tr(
+            "Drives exported from Rekordbox will show up in the list on the left under the 'Rekordbox' dropdown.");
+    const QString detail = tr(
+            "Tap a drive to browse All Tracks or Playlists. A drive is picked up automatically "
+            "when it is plugged in, and read in the background.");
 
     QString html;
-    html.append(QString("<h2>%1</h2>").arg(title));
+    html.append(QString("<h1>%1</h1>").arg(title));
     html.append(QString("<p style=\"font-size:20px;\">%1</p>").arg(summary));
-    // Colorize links in lighter blue, instead of QT default dark blue.
-    // Links are still different from regular text, but readable on dark/light backgrounds.
-    // https://github.com/mixxxdj/mixxx/issues/9103
-    html.append(QString("<p><a style=\"color:#0496FF; font-size:22px;\" href=\"refresh\">%1</a></p>")
-                        .arg(refreshLink));
+    html.append(QString("<p style=\"font-size:17px; color:#8c8c94;\">%1</p>").arg(detail));
     return html;
 }
 

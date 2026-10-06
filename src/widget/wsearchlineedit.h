@@ -31,6 +31,8 @@ class WSearchLineEdit : public QComboBox, public WBaseWidget {
     static void setSearchCompletionsEnabled(bool searchCompletionsEnabled);
     static void setSearchHistoryShortcutsEnabled(bool searchHistoryShortcutsEnabled);
     virtual void showPopup() override;
+    // The stock popup code, kept so the history list can be switched back on.
+    void showPopupOriginal();
 
     explicit WSearchLineEdit(QWidget* pParent, UserSettingsPointer pConfig = nullptr);
     ~WSearchLineEdit();
