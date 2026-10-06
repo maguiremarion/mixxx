@@ -149,6 +149,16 @@ class TrackModel {
     // if no header state exists, we may hide some columns so that the user can
     // reactivate them
     virtual bool isColumnHiddenByDefault(int column) = 0;
+    /// True if getTrack() does real work (file reads, database writes), so it must not be called
+    /// just because a row got selected. Such a model gets prepareTrack() instead.
+    virtual bool isGetTrackExpensive() const {
+        return false;
+    }
+    /// Called once the user has settled on a row. A model whose getTrack() is expensive can
+    /// start the slow part in the background here, so it is ready when the track is loaded.
+    virtual void prepareTrack(const QModelIndex& index) const {
+        Q_UNUSED(index);
+    }
     /// Optional default layout, used when no layout has been saved for this model yet:
     /// the columns to show, in order, as (column index, width in pixels). Every column that
     /// isn't listed starts hidden. Empty (the default) keeps Mixxx's usual defaults.

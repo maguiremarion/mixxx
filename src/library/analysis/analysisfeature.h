@@ -49,6 +49,8 @@ class AnalysisFeature : public LibraryFeature {
     void onTrackAnalysisSchedulerFinished();
 
   private:
+    // Set once the Analyze page has been shown (see refreshLibraryModels()).
+    bool m_wasActivated = false;
     // Sets the title of this feature to the default name, given by
     // m_sAnalysisTitleName
     void resetTitle();

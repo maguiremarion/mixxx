@@ -182,7 +182,7 @@ TreeItemModel* MixxxLibraryFeature::sidebarModel() const {
 }
 
 void MixxxLibraryFeature::refreshLibraryModels() {
-    if (m_pLibraryTableModel) {
+    if (m_pLibraryTableModel && m_wasActivated) {
         m_pLibraryTableModel->select();
     }
     if (m_pMissingView) {
@@ -218,6 +218,7 @@ void MixxxLibraryFeature::slotUpdateTrackCount() {
 
 void MixxxLibraryFeature::activate() {
     //qDebug() << "MixxxLibraryFeature::activate()";
+    m_wasActivated = true;
     emit saveModelState();
     emit showTrackModel(m_pLibraryTableModel);
     emit enableCoverArtDisplay(true);

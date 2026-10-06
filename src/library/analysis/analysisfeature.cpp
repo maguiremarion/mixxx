@@ -126,13 +126,15 @@ TreeItemModel* AnalysisFeature::sidebarModel() const {
 }
 
 void AnalysisFeature::refreshLibraryModels() {
-    if (m_pAnalysisView) {
+    // Reloading the table after every rescan is wasted work while the page was never opened.
+    if (m_pAnalysisView && m_wasActivated) {
         m_pAnalysisView->onShow();
     }
 }
 
 void AnalysisFeature::activate() {
     //qDebug() << "AnalysisFeature::activate()";
+    m_wasActivated = true;
     emit switchToView(kViewName);
     if (m_pAnalysisView) {
         emit restoreSearch(m_pAnalysisView->currentSearch());

@@ -27,11 +27,17 @@
 #include <QFuture>
 #include <QHash>
 #include <QSet>
+#include <QStringList>
+#include <QTimer>
+#include <QPointer>
 #include <QThreadPool>
 #include <QFutureWatcher>
 #include <QStringListModel>
 #include <QtConcurrentRun>
 #include <fstream>
+
+#include <atomic>
+#include <memory>
 
 #include "library/baseexternallibraryfeature.h"
 #include "library/baseexternalplaylistmodel.h"
@@ -64,6 +70,11 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
     /// it is ready (or if the track has none); the column repaints when it arrives.
     QByteArray previewWaveform(const QModelIndex& index) const;
     QAbstractItemDelegate* delegateForColumn(const int index, QObject* pParent) override;
+    /// getTrack() reads the MP3 and the analysis files from the (slow) USB stick.
+    bool isGetTrackExpensive() const override {
+        return true;
+    }
+    void prepareTrack(const QModelIndex& index) const override;
 
   protected:
     void initSortColumnMapping() override;
@@ -78,7 +89,14 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
     bool m_coverRefreshQueued = false;
     mutable QHash<QString, QByteArray> m_previewByAnlzPath;
     mutable QSet<QString> m_previewLookupStarted;
-    bool m_previewRefreshQueued = false;};
+    bool m_previewRefreshQueued = false;
+    // Bumped whenever the selection moves on, so queued preparations for rows the user has
+    // already left are skipped.
+    std::shared_ptr<std::atomic<int>> m_prepareGeneration =
+            std::make_shared<std::atomic<int>>(0);
+    mutable QThreadPool m_prepareTrackPool;};
+
+class WLibraryTextBrowser;
 
 class RekordboxFeature : public BaseExternalLibraryFeature {
     Q_OBJECT
@@ -93,6 +111,10 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
 
     TreeItemModel* sidebarModel() const override;
 
+    /// Look for Rekordbox drives and read them in the background, without switching views, so
+    /// a drive's playlists are already there when it is tapped.
+    void preloadDevices();
+
   public slots:
     void activate() override;
     void activateChild(const QModelIndex& index) override;
@@ -105,6 +127,11 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
 
   private:
     QString formatRootViewHtml() const;
+    void startDeviceParse(TreeItem* pDeviceItem, bool showWhenDone);
+    void startNextQueuedParse();
+    TreeItem* findDeviceItem(const QString& devicePath) const;
+    void showLoadingPage(const QString& heading, const QString& message, bool animate);
+    void updateLoadingPage();
     std::unique_ptr<BaseSqlTableModel> createPlaylistModelForPlaylist(
             const QVariant& data) override;
 
@@ -116,6 +143,17 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
     QFutureWatcher<QString> m_tracksFutureWatcher;
     QFuture<QString> m_tracksFuture;
     QString m_title;
+
+    // Reading drives: one at a time, in the background.
+    QStringList m_parseQueue;      // device paths waiting their turn
+    QString m_parsingDevicePath;   // the device being read right now (empty = idle)
+    QString m_showWhenParsed;      // show this device's tracks when it finishes (it was tapped)
+    QPointer<WLibraryTextBrowser> m_pLoadingView;
+    QTimer m_loadingTimer;
+    QString m_loadingHeading;
+    QString m_loadingMessage;
+    bool m_loadingAnimate = false;
+    int m_loadingDots = 0;
 
     QSharedPointer<BaseTrackCache> m_trackSource;
 };

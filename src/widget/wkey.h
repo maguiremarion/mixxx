@@ -13,6 +13,9 @@ class WKey : public WLabel  {
     void onConnectedControlChanged(double dParameter, double dValue) override;
     void setup(const QDomNode& node, const SkinContext& context) override;
 
+  protected:
+    void mousePressEvent(QMouseEvent* pEvent) override;
+
   private slots:
     void setValue();
     void keyNotationChanged(double dValue);
@@ -23,6 +26,9 @@ class WKey : public WLabel  {
     bool m_displayCents;
     bool m_displayKey;
     ControlProxy m_keyNotation;
+    // [Skin],key_show_camelot: 1 = show keys as 1A / 12B, 0 = the usual notation. One control
+    // shared by every key label (a tap on any of them flips it), saved between runs.
+    ControlProxy m_showCamelot;
     ControlProxy m_engineKeyDistance;
     ControlProxy m_engineKey;
     ColorPaletteSettings m_colorPaletteSettings;

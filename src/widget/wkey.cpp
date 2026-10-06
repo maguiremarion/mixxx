@@ -1,17 +1,41 @@
 #include "widget/wkey.h"
 
+#include <QMouseEvent>
+#include <QPainter>
 #include <QStyleOption>
 #include <QStylePainter>
 
+#include "control/controlpushbutton.h"
 #include "library/library_prefs.h"
 #include "moc_wkey.cpp"
 #include "preferences/usersettings.h"
 #include "skin/legacy/skincontext.h"
 #include "track/keyutils.h"
 
+#include <algorithm>
+#include <memory>
+
+namespace {
+
+const ConfigKey kShowCamelotKey(QStringLiteral("[Skin]"), QStringLiteral("key_show_camelot"));
+
+// Creates the shared "show keys as 1A" toggle the first time a key label is built. It must exist
+// before the labels' proxies are made (a proxy to a missing control stays invalid).
+ConfigKey ensureShowCamelotControl() {
+    static std::unique_ptr<ControlPushButton> s_pShowCamelot;
+    if (!s_pShowCamelot) {
+        s_pShowCamelot = std::make_unique<ControlPushButton>(kShowCamelotKey, /*persist*/ true);
+        s_pShowCamelot->setButtonMode(mixxx::control::ButtonMode::Toggle);
+    }
+    return kShowCamelotKey;
+}
+
+} // namespace
+
 WKey::WKey(const QString& group, UserSettingsPointer pConfig, QWidget* pParent)
         : WLabel(pParent),
           m_keyNotation(mixxx::library::prefs::kKeyNotationConfigKey, this),
+          m_showCamelot(ensureShowCamelotControl(), this),
           m_engineKeyDistance(group,
                   "visual_key_distance",
                   this,
@@ -23,6 +47,7 @@ WKey::WKey(const QString& group, UserSettingsPointer pConfig, QWidget* pParent)
           m_colorPaletteSettings(pConfig) {
     setValue();
     m_keyNotation.connectValueChanged(this, &WKey::keyNotationChanged);
+    m_showCamelot.connectValueChanged(this, [this](double) { setValue(); });
     m_engineKeyDistance.connectValueChanged(this, &WKey::setCents);
 }
 
@@ -47,7 +72,9 @@ void WKey::setValue() {
         // Render this key with the user-provided notation.
         QString keyStr = "";
         if (m_displayKey) {
-            keyStr = KeyUtils::keyToString(m_key);
+            keyStr = m_showCamelot.get() > 0.0
+                    ? KeyUtils::keyToString(m_key, KeyUtils::KeyNotation::Lancelot)
+                    : KeyUtils::keyToString(m_key);
         }
         if (m_displayCents) {
             int cents_to_display = static_cast<int>(m_diff_cents * 100);
@@ -64,6 +91,19 @@ void WKey::setValue() {
         setText("");
     }
     update();
+}
+
+void WKey::mousePressEvent(QMouseEvent* pEvent) {
+    // A tap flips every key label between e.g. "Gm" and "1A".
+    if (pEvent->button() == Qt::LeftButton) {
+        m_showCamelot.set(m_showCamelot.get() > 0.0 ? 0.0 : 1.0);
+        // A ControlProxy doesn't signal the object that made the change, so this label has to
+        // refresh itself (any other key label hears about it through the signal).
+        setValue();
+        pEvent->accept();
+        return;
+    }
+    WLabel::mousePressEvent(pEvent);
 }
 
 void WKey::setCents() {
@@ -83,53 +123,49 @@ void WKey::paintEvent(QPaintEvent* event) {
         return;
     }
 
+    // The text, left-aligned like the other sidebar rows, then a small pale square in the key's
+    // colour to its right ("♭ G♯m ■").
     ColorPalette keyColorPalette = m_colorPaletteSettings.getConfigKeyColorPalette();
-
-    QColor colorTop, colorBottom;
-    double splitPoint = 0; // 'height' of top color
-    if (m_diff_cents < 0) {
-        colorTop = KeyUtils::keyToColor(m_key, keyColorPalette);
-        colorBottom = KeyUtils::keyToColor(KeyUtils::scaleKeySteps(m_key, -1), keyColorPalette);
-        splitPoint = m_diff_cents + 1;
-    } else {
-        colorTop = KeyUtils::keyToColor(KeyUtils::scaleKeySteps(m_key, 1), keyColorPalette);
-        colorBottom = KeyUtils::keyToColor(m_key, keyColorPalette);
-        splitPoint = m_diff_cents;
-    }
+    QColor squareColor = KeyUtils::keyToColor(m_key, keyColorPalette);
+    // paler: 45 % of the way to white
+    squareColor = QColor::fromRgbF(
+            squareColor.redF() * 0.55 + 0.45,
+            squareColor.greenF() * 0.55 + 0.45,
+            squareColor.blueF() * 0.55 + 0.45);
 
     QStyleOption option;
     option.initFrom(this);
     QStylePainter painter(this);
 
-    const QStyle* pStyle = style();
-    const QRect contRect = pStyle->subElementRect(QStyle::SE_FrameContents, &option, this);
+    // Paint the stylesheet's background/border first: this custom painting never did.
+    painter.drawPrimitive(QStyle::PE_Widget, option);
 
-    const int rectWidth = 4;
-    const int splitHeight = static_cast<int>(contRect.height() * splitPoint);
+    const QFontMetrics fontMetrics = option.fontMetrics;
+    const int squareSize = std::max(8, fontMetrics.height() / 2);
+    const int gap = 8;
+    const QString elidedText = fontMetrics.elidedText(
+            text(), Qt::ElideRight, std::max(0, width() - squareSize - gap));
+    const int textWidth = fontMetrics.horizontalAdvance(elidedText);
+    const bool centered = (alignment() & Qt::AlignHCenter) != 0;
+    const int startX = centered ? std::max(0, (width() - textWidth - gap - squareSize) / 2) : 0;
 
-    painter.fillRect(contRect.left(),
-            contRect.top(),
-            rectWidth,
-            splitHeight,
-            colorTop);
-
-    painter.fillRect(contRect.left(),
-            splitHeight + 1,
-            rectWidth,
-            contRect.height() - splitHeight,
-            colorBottom);
-
-    painter.setPen(option.palette.text().color());
-
-    QString elidedText = option.fontMetrics.elidedText(
-            text(),
-            Qt::ElideRight,
-            width() - rectWidth);
-
-    painter.drawText(rectWidth,
-            contRect.top(),
-            contRect.width() - rectWidth,
-            contRect.height(),
-            Qt::AlignCenter,
+    painter.setPen(option.palette.color(foregroundRole()));
+    painter.drawText(QRect(startX, 0, textWidth + 2, height()),
+            Qt::AlignLeft | Qt::AlignVCenter,
             elidedText);
+
+    // Centre the square on the capital letters, not on the row: the text is centred as a whole
+    // line (ascent + descent), so its capitals sit a little above the middle of the row.
+    const int baseline = (height() - (fontMetrics.ascent() + fontMetrics.descent())) / 2 +
+            fontMetrics.ascent();
+    const int squareCenterY = baseline - static_cast<int>(fontMetrics.capHeight() / 2);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(squareColor);
+    painter.drawRoundedRect(QRectF(startX + textWidth + gap,
+                                    squareCenterY - squareSize / 2.0,
+                                    squareSize,
+                                    squareSize),
+            squareSize * 0.3,
+            squareSize * 0.3);
 }

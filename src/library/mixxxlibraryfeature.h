@@ -76,6 +76,9 @@ class MixxxLibraryFeature final : public LibraryFeature {
     DlgHidden* m_pHiddenView;
 
     int m_trackCount;
+    // Set once the Tracks page has been shown. Until then a library rescan doesn't reload the
+    // (whole-library) table: nobody is looking at it.
+    bool m_wasActivated = false;
 
 #ifdef __ENGINEPRIME__
     parented_ptr<QAction> m_pExportLibraryAction;

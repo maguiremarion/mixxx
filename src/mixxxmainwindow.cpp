@@ -421,21 +421,27 @@ void MixxxMainWindow::initialize() {
                     }
                 });
 
-        // Plugging in or removing a USB stick / SD card / external drive
-        // triggers a rescan, so new music shows up without a manual rescan.
+        // Plugging in or removing a USB stick / SD card / external drive can trigger a
+        // rescan of the Mixxx library (off by default: it is a lot of disk work on a Pi,
+        // and Rekordbox drives don't need it).
         // Note: a scan uses CPU and disk, so switch this off for a live set:
         // [App],auto_rescan_on_volume_change = 0.
         m_pAutoRescanOnVolumeChange = std::make_unique<ControlPushButton>(
                 ConfigKey(QStringLiteral("[App]"),
                         QStringLiteral("auto_rescan_on_volume_change")),
                 /*persist*/ true,
-                /*defaultValue*/ 1.0);
+                /*defaultValue*/ 0.0);
         m_pAutoRescanOnVolumeChange->setButtonMode(mixxx::control::ButtonMode::Toggle);
         m_pVolumeWatcher = new VolumeWatcher(this);
         connect(m_pVolumeWatcher,
                 &VolumeWatcher::volumesChanged,
                 this,
                 [this, pTrackCollectionManager]() {
+                    // A drive came or went: (re)read any Rekordbox exports on it in the
+                    // background, so its playlists are ready when it is tapped.
+                    if (auto pLibrary = m_pCoreServices->getLibrary()) {
+                        pLibrary->preloadRekordboxDevices();
+                    }
                     if (m_pAutoRescanOnVolumeChange->get() <= 0.0) {
                         return;
                     }

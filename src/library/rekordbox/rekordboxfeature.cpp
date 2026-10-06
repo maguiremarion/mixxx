@@ -5,6 +5,8 @@
 #include <rekordbox_pdb.h>
 
 #include <QDir>
+#include <QMutexLocker>
+#include <QMutex>
 #include <QSvgRenderer>
 #include <QIcon>
 #include <QTableView>
@@ -499,6 +501,10 @@ QString parseDeviceDBImpl(mixxx::DbConnectionPoolPtr dbConnectionPool,
     QThread* thisThread = QThread::currentThread();
     thisThread->setPriority(QThread::LowPriority);
 
+    // A big page cache (64 MB, per connection) keeps SQLite from spilling a large import to
+    // disk mid-way, which would lock the GUI thread's own queries out until the commit.
+    QSqlQuery(database).exec("PRAGMA cache_size = -65536");
+
     ScopedTransaction transaction(database);
 
     QSqlQuery query(database);
@@ -664,10 +670,22 @@ QString parseDeviceDBImpl(mixxx::DbConnectionPoolPtr dbConnectionPool,
     }
 
     if (audioFilesCount > 0 || folderOrPlaylistFound) {
-        // If we have found anything, recursively build playlist/folder TreeItem children
-        // for the original device TreeItem
+        // Under the drive: "All Tracks" (the playlist the parser makes for the whole drive,
+        // named after the device path) and a "Playlists" folder holding Rekordbox's own
+        // playlist/folder tree. The folder has no tracks of its own: its empty path makes
+        // activateChild() just let it open and shut.
+        if (audioFilesCount > 0) {
+            deviceItem->appendChild(QObject::tr("All Tracks"),
+                    QVariant(QList<QString>{devicePath, IS_NOT_RECORDBOX_DEVICE}));
+        }
+        TreeItem* pPlaylistsParent = deviceItem;
+        if (folderOrPlaylistFound) {
+            pPlaylistsParent = deviceItem->appendChild(QObject::tr("Playlists"),
+                    QVariant(QList<QString>{QString(), IS_NOT_RECORDBOX_DEVICE}));
+        }
+        // Recursively build playlist/folder TreeItem children
         buildPlaylistTree(database,
-                deviceItem,
+                pPlaylistsParent,
                 0,
                 playlistNameMap,
                 playlistIsFolderMap,
@@ -1181,6 +1199,8 @@ RekordboxPlaylistModel::RekordboxPlaylistModel(QObject* parent,
                   trackSource) {
     m_coverLookupPool.setMaxThreadCount(1);
     m_coverLookupPool.setThreadPriority(QThread::LowPriority);
+    m_prepareTrackPool.setMaxThreadCount(1);
+    m_prepareTrackPool.setThreadPriority(QThread::LowPriority);
 }
 
 void RekordboxPlaylistModel::initSortColumnMapping() {
@@ -1279,6 +1299,43 @@ void RekordboxPlaylistModel::initSortColumnMapping() {
     }
 }
 
+namespace {
+
+// mp3guessenc scans the whole MP3 to work out which decoder offset Rekordbox's timing needs. That is
+// slow from a USB stick, so the result is remembered, and prepareTrack() computes it in the
+// background as soon as a row is selected. The tool keeps state, so one scan at a time.
+QMutex s_timingShiftMutex;
+QHash<QString, int> s_timingShiftByLocation;
+
+int cachedTimingShiftCase(const QString& location) {
+    QMutexLocker locker(&s_timingShiftMutex);
+    const auto cached = s_timingShiftByLocation.constFind(location);
+    if (cached != s_timingShiftByLocation.constEnd()) {
+        return cached.value();
+    }
+    const int result = mp3guessenc_timing_shift_case(location.toStdString().c_str());
+    s_timingShiftByLocation.insert(location, result);
+    return result;
+}
+
+} // namespace
+
+void RekordboxPlaylistModel::prepareTrack(const QModelIndex& index) const {
+    const QString location =
+            getFieldVariant(index, ColumnCache::COLUMN_TRACKLOCATIONSTABLE_LOCATION).toString();
+    const int generation = ++(*m_prepareGeneration);
+    if (!location.endsWith(".mp3", Qt::CaseInsensitive)) {
+        return;
+    }
+    const auto pGeneration = m_prepareGeneration;
+    (void)QtConcurrent::run(&m_prepareTrackPool, [pGeneration, generation, location]() {
+        if (pGeneration->load() != generation || !QFile::exists(location)) {
+            return; // the user moved on to another row, or the file is gone
+        }
+        cachedTimingShiftCase(location);
+    });
+}
+
 TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
     qDebug() << "RekordboxTrackModel::getTrack";
 
@@ -1303,7 +1360,7 @@ TrackPointer RekordboxPlaylistModel::getTrack(const QModelIndex& index) const {
     int timingOffset = 0;
 
     if (location.endsWith(".mp3", Qt::CaseInsensitive)) {
-        int timingShiftCase = mp3guessenc_timing_shift_case(location.toStdString().c_str());
+        int timingShiftCase = cachedTimingShiftCase(location);
 
         qDebug() << "Timing shift case:" << timingShiftCase << "for MP3 file:" << location;
 
@@ -1666,6 +1723,11 @@ RekordboxFeature::RekordboxFeature(
             &RekordboxFeature::onTracksFound);
     // initialize the model
     m_pSidebarModel->setRootItem(TreeItem::newRoot(this));
+
+    connect(&m_loadingTimer, &QTimer::timeout, this, [this]() {
+        m_loadingDots = (m_loadingDots + 1) % 4;
+        updateLoadingPage();
+    });
 }
 
 RekordboxFeature::~RekordboxFeature() {
@@ -1689,6 +1751,111 @@ void RekordboxFeature::bindLibraryWidget(WLibrary* pLibraryWidget,
     pEdit->setOpenLinks(false);
     connect(pEdit, &WLibraryTextBrowser::anchorClicked, this, &RekordboxFeature::htmlLinkClicked);
     pLibraryWidget->registerView("REKORDBOXHOME", pEdit);
+
+    // Shown while a drive is being read (and if reading it failed).
+    parented_ptr<WLibraryTextBrowser> pLoading = make_parented<WLibraryTextBrowser>(pLibraryWidget);
+    m_pLoadingView = pLoading.get();
+    pLibraryWidget->registerView("REKORDBOXLOADING", pLoading);
+}
+
+void RekordboxFeature::showLoadingPage(
+        const QString& heading, const QString& message, bool animate) {
+    m_loadingHeading = heading;
+    m_loadingMessage = message;
+    m_loadingAnimate = animate;
+    m_loadingDots = 0;
+    updateLoadingPage();
+    if (animate) {
+        m_loadingTimer.start(400);
+    } else {
+        m_loadingTimer.stop();
+    }
+    emit switchToView("REKORDBOXLOADING");
+}
+
+void RekordboxFeature::updateLoadingPage() {
+    if (!m_pLoadingView) {
+        return;
+    }
+    QString message = m_loadingMessage;
+    if (m_loadingAnimate) {
+        // Fixed width, so the text doesn't jitter as the dots come and go.
+        message += QString(m_loadingDots, QChar('.')) +
+                QString(3 - m_loadingDots, QChar(0x2007)); // figure space
+    }
+    m_pLoadingView->setHtml(QString("<h2>%1</h2><p style=\"font-size:20px;\">%2</p>")
+                                    .arg(m_loadingHeading.toHtmlEscaped(),
+                                            message.toHtmlEscaped()));
+}
+
+void RekordboxFeature::preloadDevices() {
+    if (m_devicesFutureWatcher.isRunning()) {
+        return;
+    }
+    m_devicesFuture = QtConcurrent::run(findRekordboxDevices);
+    m_devicesFutureWatcher.setFuture(m_devicesFuture);
+}
+
+TreeItem* RekordboxFeature::findDeviceItem(const QString& devicePath) const {
+    TreeItem* root = m_pSidebarModel->getRootItem();
+    for (int i = 0; i < root->childRows(); ++i) {
+        TreeItem* child = root->child(i);
+        const QList<QVariant> data = child->getData().toList();
+        if (!data.isEmpty() && data[0].toString() == devicePath) {
+            return child;
+        }
+    }
+    return nullptr;
+}
+
+void RekordboxFeature::startDeviceParse(TreeItem* pDeviceItem, bool showWhenDone) {
+    QList<QVariant> data = pDeviceItem->getData().toList();
+    VERIFY_OR_DEBUG_ASSERT(data.size() >= 2) {
+        return;
+    }
+    const QString devicePath = data[0].toString();
+    if (showWhenDone) {
+        m_showWhenParsed = devicePath;
+        showLoadingPage(pDeviceItem->getLabel(), tr("Reading drive"), true);
+    }
+    if (!m_parsingDevicePath.isEmpty()) {
+        // One drive at a time. A tapped drive goes to the front of the line.
+        m_parseQueue.removeAll(devicePath);
+        if (showWhenDone) {
+            m_parseQueue.prepend(devicePath);
+        } else {
+            m_parseQueue.append(devicePath);
+        }
+        return;
+    }
+
+    qDebug() << "Parse Rekordbox Device DB: " << devicePath;
+    m_parsingDevicePath = devicePath;
+    // Let a worker thread do the XML parsing. It gets copies of the device's name and path: the
+    // item's data is changed right below, and reading it from the thread raced with that.
+    m_tracksFuture = QtConcurrent::run(parseDeviceDB,
+            static_cast<Library*>(parent())->dbConnectionPool(),
+            pDeviceItem,
+            pDeviceItem->getLabel(),
+            devicePath);
+    m_tracksFutureWatcher.setFuture(m_tracksFuture);
+
+    // This device is now a playlist element, future activations should treat is as such
+    data[1] = QVariant(IS_NOT_RECORDBOX_DEVICE);
+    pDeviceItem->setData(QVariant(data));
+}
+
+void RekordboxFeature::startNextQueuedParse() {
+    while (m_parsingDevicePath.isEmpty() && !m_parseQueue.isEmpty()) {
+        TreeItem* pItem = findDeviceItem(m_parseQueue.takeFirst());
+        if (!pItem) {
+            continue; // unplugged while it waited
+        }
+        const QList<QVariant> data = pItem->getData().toList();
+        if (data.size() >= 2 && data[1].toString() == IS_RECORDBOX_DEVICE) {
+            startDeviceParse(pItem, m_showWhenParsed == data[0].toString());
+        }
+    }
 }
 
 void RekordboxFeature::htmlLinkClicked(const QUrl& link) {
@@ -1782,25 +1949,19 @@ void RekordboxFeature::activateChild(const QModelIndex& index) {
     QList<QVariant> data = item->getData().toList();
     QString playlist = data[0].toString();
     bool doParseDeviceDB = data[1].toString() == IS_RECORDBOX_DEVICE;
+    if (playlist.isEmpty() && !doParseDeviceDB) {
+        return; // the "Playlists" folder: nothing to show, the sidebar opens/closes it
+    }
 
     qDebug() << "RekordboxFeature::activateChild " << item->getLabel()
              << " playlist: " << playlist << " doParseDeviceDB: " << doParseDeviceDB;
 
     if (doParseDeviceDB) {
-        qDebug() << "Parse Rekordbox Device DB: " << playlist;
-
-        // Let a worker thread do the XML parsing
-        m_tracksFuture = QtConcurrent::run(parseDeviceDB,
-                static_cast<Library*>(parent())->dbConnectionPool(),
-                item,
-                item->getLabel(),
-                playlist);
-        m_tracksFutureWatcher.setFuture(m_tracksFuture);
-
-        // This device is now a playlist element, future activations should treat is
-        // as such
-        data[1] = QVariant(IS_NOT_RECORDBOX_DEVICE);
-        item->setData(QVariant(data));
+        startDeviceParse(item, true);
+    } else if (!m_parsingDevicePath.isEmpty() && playlist == m_parsingDevicePath) {
+        // Tapped while it is still being read (it was started in the background).
+        m_showWhenParsed = playlist;
+        showLoadingPage(item->getLabel(), tr("Reading drive"), true);
     } else {
         qDebug() << "Activate Rekordbox Playlist: " << playlist;
         m_pRekordboxPlaylistModel->setPlaylist(playlist);
@@ -1815,10 +1976,10 @@ namespace {
 QIcon usbDriveIcon() {
     static const QByteArray kSvg = QByteArrayLiteral(
             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
-            "<rect fill='#ff6600' x='7' y='1' width='10' height='8'/>"
+            "<rect fill='#ffffff' x='7' y='1' width='10' height='8'/>"
             "<rect fill='#181818' x='9.2' y='3' width='1.8' height='3.2'/>"
             "<rect fill='#181818' x='13' y='3' width='1.8' height='3.2'/>"
-            "<rect fill='#ff6600' x='5' y='9' width='14' height='14' rx='2.5'/>"
+            "<rect fill='#ffffff' x='5' y='9' width='14' height='14' rx='2.5'/>"
             "<rect fill='#181818' x='9' y='13' width='6' height='2' rx='1'/>"
             "</svg>");
     QSvgRenderer renderer(kSvg);
@@ -1843,6 +2004,13 @@ void RekordboxFeature::onRekordboxDevicesFound() {
 
     if (foundDevices.size() == 0) {
         // No Rekordbox devices found
+        if (root->childRows() == 0) {
+            // Nothing was there before either: the (empty) tables are already fresh, so don't
+            // drop and recreate them on the GUI thread every time Rekordbox is tapped.
+            m_title = tr("Rekordbox");
+            emit featureLoadingFinished(this);
+            return;
+        }
         ScopedTransaction transaction(database);
 
         dropTable(database, kRekordboxPlaylistTracksTable);
@@ -1904,6 +2072,19 @@ void RekordboxFeature::onRekordboxDevicesFound() {
         }
     }
 
+    // Start reading every new drive in the background right away, one at a time, so its
+    // playlists are ready by the time it is tapped.
+    for (int i = 0; i < root->childRows(); ++i) {
+        const QList<QVariant> data = root->child(i)->getData().toList();
+        if (data.size() >= 2 && data[1].toString() == IS_RECORDBOX_DEVICE) {
+            const QString devicePath = data[0].toString();
+            if (devicePath != m_parsingDevicePath && !m_parseQueue.contains(devicePath)) {
+                m_parseQueue.append(devicePath);
+            }
+        }
+    }
+    startNextQueuedParse();
+
     // calls a slot in the sidebarmodel such that 'isLoading' is removed from the feature title.
     m_title = tr("Rekordbox");
     emit featureLoadingFinished(this);
@@ -1913,16 +2094,47 @@ void RekordboxFeature::onTracksFound() {
     qDebug() << "onTracksFound";
     m_pSidebarModel->triggerRepaint();
 
+    const QString finishedDevice = m_parsingDevicePath;
+    m_parsingDevicePath.clear();
+
     QString devicePlaylist;
+    bool ok = true;
     try {
         devicePlaylist = m_tracksFuture.result();
     } catch (const std::exception& e) {
         qWarning() << "Failed to load Rekordbox database:" << e.what();
-        return;
+        ok = false;
+    }
+    ok = ok && !devicePlaylist.isEmpty();
+
+    if (!ok) {
+        // Make the next tap on this drive try again instead of showing an empty list.
+        if (TreeItem* pItem = findDeviceItem(finishedDevice)) {
+            QList<QVariant> data = pItem->getData().toList();
+            if (data.size() >= 2) {
+                data[1] = QVariant(IS_RECORDBOX_DEVICE);
+                pItem->setData(QVariant(data));
+            }
+        }
     }
 
-    qDebug() << "Show Rekordbox Device Playlist: " << devicePlaylist;
-
-    m_pRekordboxPlaylistModel->setPlaylist(devicePlaylist);
-    emit showTrackModel(m_pRekordboxPlaylistModel);
+    const bool wanted = !finishedDevice.isEmpty() && m_showWhenParsed == finishedDevice;
+    if (wanted) {
+        m_showWhenParsed.clear();
+        m_loadingTimer.stop();
+        // Only jump to the list if the loading page is still what the user is looking at.
+        const bool stillWaiting = m_pLoadingView && m_pLoadingView->isVisible();
+        if (ok) {
+            if (stillWaiting) {
+                qDebug() << "Show Rekordbox Device Playlist: " << devicePlaylist;
+                m_pRekordboxPlaylistModel->setPlaylist(devicePlaylist);
+                emit showTrackModel(m_pRekordboxPlaylistModel);
+            }
+        } else if (stillWaiting) {
+            showLoadingPage(tr("Couldn't read this drive"),
+                    tr("Tap the drive to try again."),
+                    false);
+        }
+    }
+    startNextQueuedParse();
 }

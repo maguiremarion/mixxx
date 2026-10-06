@@ -70,6 +70,10 @@ class Library: public QObject {
 
     void bindSearchboxWidget(WSearchLineEdit* pSearchboxWidget);
     void bindSidebarWidget(WLibrarySidebar* sidebarWidget);
+
+    /// Look for Rekordbox drives and read them in the background (e.g. after a USB stick was
+    /// plugged in), without changing what is shown.
+    void preloadRekordboxDevices();
     void bindLibraryWidget(WLibrary* libraryWidget,
                     KeyboardEventFilter* pKeyboard);
 
