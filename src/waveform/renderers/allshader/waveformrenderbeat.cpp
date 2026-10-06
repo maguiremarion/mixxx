@@ -21,9 +21,15 @@ namespace allshader {
 WaveformRenderBeat::WaveformRenderBeat(WaveformWidgetRenderer* waveformWidget,
         ::WaveformRendererAbstract::PositionSource type)
         : ::WaveformRendererAbstract(waveformWidget),
+          m_pDownbeatNode(nullptr),
           m_isSlipRenderer(type == ::WaveformRendererAbstract::Slip) {
     initForRectangles<UniColorMaterial>(0);
     setUsePreprocess(true);
+
+    auto pNode = std::make_unique<rendergraph::GeometryNode>();
+    m_pDownbeatNode = pNode.get();
+    m_pDownbeatNode->initForRectangles<UniColorMaterial>(0);
+    appendChildNode(std::move(pNode));
 }
 
 void WaveformRenderBeat::setup(const QDomNode& node, const SkinContext& skinContext) {
@@ -41,6 +47,8 @@ void WaveformRenderBeat::preprocess() {
     if (!preprocessInner()) {
         geometry().allocate(0);
         markDirtyGeometry();
+        m_pDownbeatNode->geometry().allocate(0);
+        m_pDownbeatNode->markDirtyGeometry();
     }
 }
 
@@ -107,9 +115,20 @@ bool WaveformRenderBeat::preprocessInner() {
     //   int numBearsInRange = trackBeats->numBeatsInRange(startPosition, endPosition);
     // for this, but there have been reports of that method failing with a DEBUG_ASSERT.
     int numBeatsInRange = 0;
-    for (auto it = trackBeats->iteratorFrom(startPosition);
-            it != trackBeats->cend() && *it <= endPosition;
-            ++it) {
+    // Index of the first displayed beat in the whole grid, to tell which beats start a bar.
+    const auto firstShownBeat = trackBeats->iteratorFrom(startPosition);
+    const int firstShownIndex = static_cast<int>(firstShownBeat - trackBeats->cbegin());
+    const int downbeatPhase = trackInfo->downbeatPhase();
+    const auto isDownbeat = [downbeatPhase](int beatIndex) {
+        return ((beatIndex - downbeatPhase) % 4 + 4) % 4 == 0;
+    };
+    // Bar starts are drawn on top in red, except in the slip and per-stem layouts.
+    const bool drawDownbeats = !m_isSlipRenderer && !splitStemTracks;
+    int numDownbeatsInRange = 0;
+    for (auto it = firstShownBeat; it != trackBeats->cend() && *it <= endPosition; ++it) {
+        if (drawDownbeats && isDownbeat(firstShownIndex + numBeatsInRange)) {
+            numDownbeatsInRange++;
+        }
         numBeatsInRange++;
     }
 
@@ -121,13 +140,18 @@ bool WaveformRenderBeat::preprocessInner() {
 
     VertexUpdater vertexUpdater{geometry().vertexDataAs<Geometry::Point2D>()};
 
+    m_pDownbeatNode->geometry().allocate(numDownbeatsInRange * numVerticesPerLine);
+    VertexUpdater downbeatUpdater{
+            m_pDownbeatNode->geometry().vertexDataAs<Geometry::Point2D>()};
+
     const float boxBreadth = splitStemTracks
             ? rendererBreadth / static_cast<float>(mixxx::kMaxSupportedStems)
             : rendererBreadth;
 
+    int beatIndex = firstShownIndex;
     for (auto it = trackBeats->iteratorFrom(startPosition);
             it != trackBeats->cend() && *it <= endPosition;
-            ++it) {
+            ++it, ++beatIndex) {
         double beatPosition = it->toEngineSamplePos();
         double xBeatPoint =
                 m_waveformRenderer->transformSamplePositionInRendererWorld(
@@ -147,14 +171,22 @@ bool WaveformRenderBeat::preprocessInner() {
         } else {
             vertexUpdater.addRectangle({x1, 0.f},
                     {x2, m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth});
+            if (drawDownbeats && isDownbeat(beatIndex)) {
+                // twice as wide as the ordinary line
+                downbeatUpdater.addRectangle({x1 - 0.5f, 0.f}, {x1 + 1.5f, rendererBreadth});
+            }
         }
     }
     markDirtyGeometry();
+    m_pDownbeatNode->markDirtyGeometry();
 
     DEBUG_ASSERT(reserved == vertexUpdater.index());
 
     material().setUniform(1, m_color);
     markDirtyMaterial();
+    // Rekordbox-style red for the first beat of each bar
+    m_pDownbeatNode->material().setUniform(1, QColor(0xff, 0x3b, 0x3b));
+    m_pDownbeatNode->markDirtyMaterial();
 
     return true;
 }

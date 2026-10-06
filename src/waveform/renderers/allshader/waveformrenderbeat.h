@@ -37,6 +37,8 @@ class allshader::WaveformRenderBeat final
     }
 
   private:
+    // Child node that draws the bar starts (downbeats) on top of the ordinary beat lines.
+    rendergraph::GeometryNode* m_pDownbeatNode;
     QColor m_color;
     bool m_isSlipRenderer;
 

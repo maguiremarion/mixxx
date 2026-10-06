@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QObject>
+#include <atomic>
 #include <QStack>
 #include <QUrl>
 #include <memory>
@@ -202,6 +203,17 @@ class Track : public QObject {
     // Returns the track color
     mixxx::RgbColor::optional_t getColor() const;
     void setColor(const mixxx::RgbColor::optional_t&);
+
+    /// Which beat of the beat grid (0-3, counted from the first beat) is the first beat of a
+    /// bar, so the waveform can mark bar starts ("downbeats"). Not saved with the track: it is
+    /// filled in when a Rekordbox track is loaded (Rekordbox's grid says which beat is the 1).
+    /// For every other track it stays 0, i.e. the first beat is taken to start a bar.
+    int downbeatPhase() const {
+        return m_downbeatPhase.load(std::memory_order_relaxed);
+    }
+    void setDownbeatPhase(int phase) {
+        m_downbeatPhase.store(((phase % 4) + 4) % 4, std::memory_order_relaxed);
+    }
     QString getComment() const;
     void setComment(const QString&);
     void clearComment() {
@@ -509,6 +521,7 @@ class Track : public QObject {
     void slotCueUpdated();
 
   private:
+    std::atomic<int> m_downbeatPhase{0};
     /// Set a unique identifier for the track.
     /// Only used by GlobalTrackCacheResolver when the track is saved to db for the first time
     void initId(TrackId id);

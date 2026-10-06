@@ -87,8 +87,11 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
     const float rendererHeight = m_waveformRenderer->getHeight();
 
     int beatCount = 0;
+    int downbeatCount = 0;
+    const int downbeatPhase = pTrackInfo->downbeatPhase();
+    int beatIndex = static_cast<int>(it - trackBeats->cbegin());
 
-    for (; it != trackBeats->cend() && *it <= endPosition; ++it) {
+    for (; it != trackBeats->cend() && *it <= endPosition; ++it, ++beatIndex) {
         double beatPosition = it->toEngineSamplePos();
         double xBeatPoint =
                 m_waveformRenderer->transformSamplePositionInRendererWorld(beatPosition);
@@ -105,8 +108,23 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
         } else {
             m_beats[beatCount++].setLine(0.0f, xBeatPoint, rendererWidth, xBeatPoint);
         }
+
+        // The first beat of each bar: remember its line, drawn on top in red below.
+        if (((beatIndex - downbeatPhase) % 4 + 4) % 4 == 0) {
+            if (downbeatCount >= m_downbeats.size()) {
+                m_downbeats.resize(std::max<qsizetype>(16, m_downbeats.size() * 2));
+            }
+            m_downbeats[downbeatCount++] = m_beats[beatCount - 1];
+        }
     }
 
     // Make sure to use constData to prevent detaches!
     painter->drawLines(m_beats.constData(), beatCount);
+
+    if (downbeatCount > 0) {
+        QPen downbeatPen(QColor(0xff, 0x3b, 0x3b));
+        downbeatPen.setWidthF(std::max(1.0, scaleFactor()) * 2.0);
+        painter->setPen(downbeatPen);
+        painter->drawLines(m_downbeats.constData(), downbeatCount);
+    }
 }

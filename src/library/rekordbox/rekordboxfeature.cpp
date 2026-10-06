@@ -990,6 +990,17 @@ void readAnalyze(TrackPointer track,
                     beats,
                     mixxx::rekordboxconstants::beatsSubversion);
             track->trySetBeats(pBeats);
+
+            // Rekordbox numbers every beat 1-4 within its bar. If the grid starts on beat n, the
+            // first "1" is the (5 - n) % 4'th beat (counting from 0): used to mark bar starts
+            // in red on the waveform.
+            if (!beatGridTag->beats()->empty()) {
+                const int firstBeatNumber =
+                        static_cast<int>(beatGridTag->beats()->front()->beat_number());
+                if (firstBeatNumber >= 1 && firstBeatNumber <= 4) {
+                    track->setDownbeatPhase((5 - firstBeatNumber) % 4);
+                }
+            }
         } break;
         case rekordbox_anlz_t::SECTION_TAGS_CUES: {
             if (ignoreCues) {
