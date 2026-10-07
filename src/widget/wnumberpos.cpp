@@ -34,12 +34,12 @@ void WNumberPos::mousePressEvent(QMouseEvent* pEvent) {
     bool leftClick = pEvent->buttons() & Qt::LeftButton;
 
     if (leftClick) {
-        // Cycle through display modes
+        // Switch between elapsed and remaining time. (Stock Mixxx has a third mode, "elapsed and
+        // remaining" in one label; it doesn't fit the compact time box and showed as nothing,
+        // so it is not offered in this build.)
         if (m_displayMode == TrackTime::DisplayMode::ELAPSED) {
             m_displayMode = TrackTime::DisplayMode::REMAINING;
-        } else if (m_displayMode == TrackTime::DisplayMode::REMAINING) {
-            m_displayMode = TrackTime::DisplayMode::ELAPSED_AND_REMAINING;
-        } else if (m_displayMode == TrackTime::DisplayMode::ELAPSED_AND_REMAINING) {
+        } else {
             m_displayMode = TrackTime::DisplayMode::ELAPSED;
         }
 
@@ -111,9 +111,8 @@ void WNumberPos::slotTimeRemainingUpdated(double dTimeRemaining) {
 void WNumberPos::slotSetDisplayMode(double remain) {
     if (remain == 1.0) {
         m_displayMode = TrackTime::DisplayMode::REMAINING;
-    } else if (remain == 2.0) {
-        m_displayMode = TrackTime::DisplayMode::ELAPSED_AND_REMAINING;
     } else {
+        // 0 = elapsed. A saved 2 (the removed "both" mode) also falls back to elapsed.
         m_displayMode = TrackTime::DisplayMode::ELAPSED;
     }
 
