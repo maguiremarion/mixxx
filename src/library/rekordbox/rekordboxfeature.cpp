@@ -1490,31 +1490,52 @@ class RekordboxOverviewDelegate : public TableItemDelegate {
         if (area.width() <= 0 || area.height() <= 0) {
             return;
         }
-        painter->save();
-        const double middle = area.top() + area.height() / 2.0;
-        const double halfHeight = area.height() / 2.0;
+        // The ~170 coloured lines of a waveform are drawn once per track and cell size into a
+        // pixmap, which is then just blitted on every repaint (scrolling repaints a lot).
+        const qreal ratio = m_pTableView->devicePixelRatioF();
+        if (area.size() != m_cachedSize || ratio != m_cachedRatio) {
+            m_pixmaps.clear();
+            m_cachedSize = area.size();
+            m_cachedRatio = ratio;
+        }
+        const quint64 key = static_cast<quint64>(qHash(data, 0));
+        auto it = m_pixmaps.constFind(key);
+        if (it == m_pixmaps.constEnd()) {
+            if (m_pixmaps.size() > 300) {
+                m_pixmaps.clear(); // far more than a screenful: start over
+            }
+            it = m_pixmaps.insert(key, render(data, area.size(), ratio));
+        }
+        painter->drawPixmap(area.topLeft(), it.value());
+    }
+
+  private:
+    static QPixmap render(const QByteArray& data, const QSize& size, qreal ratio) {
+        QPixmap pixmap(size * ratio);
+        pixmap.setDevicePixelRatio(ratio);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        const double halfHeight = size.height() / 2.0;
         const int count = static_cast<int>(data.size());
-        for (int x = 0; x < area.width(); ++x) {
-            const int i = std::min(count - 1, x * count / area.width());
+        for (int x = 0; x < size.width(); ++x) {
+            const int i = std::min(count - 1, x * count / size.width());
             const auto value = static_cast<quint8>(data.at(i));
             const double amplitude = (value & 0x1F) / 31.0 * halfHeight;
             const double white = (value >> 5) / 7.0;
             // orange, fading to white where Rekordbox marks the column "whiter" (it is blue in
             // Rekordbox itself; orange here so it doesn't clash with the blue row highlight)
-            const QColor color(255,
+            painter.setPen(QColor(255,
                     static_cast<int>(122 + 133 * white),
-                    static_cast<int>(26 + 229 * white));
-            painter->setPen(color);
-            painter->drawLine(QLineF(area.left() + x + 0.5,
-                    middle - amplitude,
-                    area.left() + x + 0.5,
-                    middle + amplitude));
+                    static_cast<int>(26 + 229 * white)));
+            painter.drawLine(QLineF(x + 0.5, halfHeight - amplitude, x + 0.5, halfHeight + amplitude));
         }
-        painter->restore();
+        return pixmap;
     }
 
-  private:
     QPointer<const RekordboxPlaylistModel> m_pModel;
+    mutable QHash<quint64, QPixmap> m_pixmaps;
+    mutable QSize m_cachedSize;
+    mutable qreal m_cachedRatio = 0;
 };
 
 } // namespace

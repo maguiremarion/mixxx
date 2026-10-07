@@ -36,6 +36,10 @@ class VolumeWatcher : public QObject {
   private:
     static QStringList rootPaths(const QList<Volume>& volumes);
 
+    // The mount list is read on a worker thread: QStorageInfo asks the kernel for every mount, and
+    // a stalled USB or network mount would otherwise freeze the UI every poll.
+    bool m_polling = false;
+
     QTimer m_pollTimer;
     QTimer m_settleTimer;
     QStringList m_lastRoots;

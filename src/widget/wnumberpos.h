@@ -14,6 +14,7 @@ class WNumberPos : public WNumber {
 
   protected:
     void mousePressEvent(QMouseEvent* pEvent) override;
+    void showEvent(QShowEvent* pEvent) override;
 
   private slots:
     void setValue(double dValue) override;

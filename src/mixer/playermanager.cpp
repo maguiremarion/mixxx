@@ -1,5 +1,7 @@
 #include "mixer/playermanager.h"
 
+#include <algorithm>
+
 #include <QRegularExpression>
 
 #include "audio/types.h"
@@ -325,7 +327,11 @@ void PlayerManager::addDeck() {
 }
 
 void PlayerManager::addConfiguredDecks() {
-    slotChangeNumDecks(m_pSoundManager->getConfiguredDeckCount());
+    // This build is for 2-deck use. A saved sound configuration may still say 4 decks (the
+    // Mixxx default skin could be 4-deck): each extra deck is an engine channel, a reader thread
+    // (about 20 MB with stems), stem channels and their effect chains, for nothing.
+    constexpr int kMaxDecks = 2;
+    slotChangeNumDecks(std::min(m_pSoundManager->getConfiguredDeckCount(), kMaxDecks));
 }
 
 void PlayerManager::addDeckInner() {

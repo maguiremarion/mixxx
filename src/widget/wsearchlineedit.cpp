@@ -731,7 +731,11 @@ void WSearchLineEdit::updateClearAndDropdownButton(const QString& text) {
                                                QString::number(paddingPx),
                                                QString::number(dropDownWidth),
                                                QString::number(innerHeight));
-    setStyleSheet(styleSheet);
+    // Re-applying an identical stylesheet re-polishes the widget; it only really changes when the
+    // text flips between empty and not empty, not on every keystroke.
+    if (this->styleSheet() != styleSheet) {
+        setStyleSheet(styleSheet);
+    }
 }
 
 void WSearchLineEdit::updateCompleter() {

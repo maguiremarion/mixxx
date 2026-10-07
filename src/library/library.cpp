@@ -180,31 +180,9 @@ Library::Library(
             this,
             &Library::onTrackAnalyzerProgress);
 
-    // iTunes and Rhythmbox should be last until we no longer have an obnoxious
-    // messagebox popup when you select them. (This forces you to reach for your
-    // mouse or keyboard if you're using MIDI control and you scroll through them...)
-    if (RhythmboxFeature::isSupported() &&
-            m_pConfig->getValue(
-                    ConfigKey(kConfigGroup, "ShowRhythmboxLibrary"), true)) {
-        addFeature(new RhythmboxFeature(this, m_pConfig));
-    }
-    if (m_pConfig->getValue(
-                ConfigKey(kConfigGroup, "ShowBansheeLibrary"), true)) {
-        BansheeFeature::prepareDbPath(m_pConfig);
-        if (BansheeFeature::isSupported()) {
-            addFeature(new BansheeFeature(this, m_pConfig));
-        }
-    }
-    if (ITunesFeature::isSupported() &&
-            m_pConfig->getValue(
-                    ConfigKey(kConfigGroup, "ShowITunesLibrary"), true)) {
-        addFeature(new ITunesFeature(this, m_pConfig));
-    }
-    if (TraktorFeature::isSupported() &&
-            m_pConfig->getValue(
-                    ConfigKey(kConfigGroup, "ShowTraktorLibrary"), true)) {
-        addFeature(new TraktorFeature(this, m_pConfig));
-    }
+    // Rhythmbox, Banshee, iTunes and Traktor importers are not built in this touchscreen
+    // build (a saved ShowXLibrary=1 used to keep them): each one creates models, temporary
+    // tables and a feature object at startup for libraries nobody here has.
 
     // TODO(XXX) Rekordbox feature added persistently as the only way to enable it to
     // dynamically appear/disappear when correctly prepared removable devices

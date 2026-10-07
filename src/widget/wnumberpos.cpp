@@ -1,6 +1,7 @@
 #include "widget/wnumberpos.h"
 
 #include <QMouseEvent>
+#include <QShowEvent>
 
 #include "control/controlproxy.h"
 #include "moc_wnumberpos.cpp"
@@ -56,7 +57,21 @@ void WNumberPos::setValue(double dValue) {
     slotSetTimeElapsed(m_dOldTimeElapsed);
 }
 
+void WNumberPos::showEvent(QShowEvent* pEvent) {
+    WNumber::showEvent(pEvent);
+    // The text isn't kept up to date while the widget is hidden (see slotSetTimeElapsed()):
+    // bring it up to date now.
+    slotSetTimeElapsed(m_pTimeElapsed->get());
+}
+
 void WNumberPos::slotSetTimeElapsed(double dTimeElapsed) {
+    m_dOldTimeElapsed = dTimeElapsed;
+    // With hundredths of a second shown the text changes on every frame. A widget on a page that
+    // isn't visible (the Browse / settings pages each carry their own time displays) would
+    // re-format and re-layout for nothing; it refreshes in showEvent().
+    if (!isVisible()) {
+        return;
+    }
     double dTimeRemaining = m_pTimeRemaining->get();
     QString (*timeFormat)(double dSeconds, mixxx::Duration::Precision precision);
 

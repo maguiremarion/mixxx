@@ -90,7 +90,9 @@ namespace {
 const mixxx::Logger kLogger("CoreServices");
 constexpr int kMicrophoneCount = 4;
 constexpr int kAuxiliaryCount = 4;
-constexpr int kSamplerCount = 4;
+// No sampler channels in this build: nothing here uses them, and each one costs an engine channel,
+// a high-priority reader thread and about 5 MB, plus hundreds of controls.
+constexpr int kSamplerCount = 0;
 
 #define CLEAR_AND_CHECK_DELETED(x) clearHelper(x, #x);
 

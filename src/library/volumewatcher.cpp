@@ -1,7 +1,9 @@
 #include "library/volumewatcher.h"
 
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QStorageInfo>
+#include <QtConcurrentRun>
 
 #include "moc_volumewatcher.cpp"
 
@@ -66,12 +68,22 @@ QStringList VolumeWatcher::rootPaths(const QList<Volume>& volumes) {
 }
 
 void VolumeWatcher::poll() {
-    const QStringList roots = rootPaths(externalVolumes());
-    if (roots == m_lastRoots) {
-        return;
+    if (m_polling) {
+        return; // the previous check hasn't come back yet (a slow mount): don't pile up
     }
-    m_lastRoots = roots;
-    // Restarting the timer coalesces several changes (e.g. a drive with
-    // multiple partitions) into one notification.
-    m_settleTimer.start();
+    m_polling = true;
+    auto* pWatcher = new QFutureWatcher<QStringList>(this);
+    connect(pWatcher, &QFutureWatcher<QStringList>::finished, this, [this, pWatcher]() {
+        m_polling = false;
+        const QStringList roots = pWatcher->result();
+        pWatcher->deleteLater();
+        if (roots == m_lastRoots) {
+            return;
+        }
+        m_lastRoots = roots;
+        // Restarting the timer coalesces several changes (e.g. a drive with
+        // multiple partitions) into one notification.
+        m_settleTimer.start();
+    });
+    pWatcher->setFuture(QtConcurrent::run([]() { return rootPaths(externalVolumes()); }));
 }
