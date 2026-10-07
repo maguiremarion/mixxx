@@ -3,6 +3,9 @@
 #include <QBasicTimer>
 #include <QModelIndex>
 #include <QColor>
+#include <QLabel>
+#include <QPointer>
+#include <QTimer>
 #include <QTreeView>
 
 #include "library/library_decl.h"
@@ -66,6 +69,10 @@ class WLibrarySidebar : public QTreeView, public WBaseWidget {
   protected:
     bool event(QEvent* pEvent) override;
     void rowsInserted(const QModelIndex& parent, int start, int end) override;
+    void drawRow(QPainter* pPainter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override;
+    void mouseReleaseEvent(QMouseEvent* pEvent) override;
     void drawBranches(QPainter* pPainter,
             const QRect& rect,
             const QModelIndex& index) const override;
@@ -83,6 +90,13 @@ class WLibrarySidebar : public QTreeView, public WBaseWidget {
     bool m_lastDragMoveAccepted;
     int m_featureIconSize = 0;
     QColor m_branchLineColor = QColor(0x58, 0x58, 0x58);
+    // A removable drive's row (Rekordbox drives) has an eject button at its right end.
+    bool ejectButtonAt(const QModelIndex& index, QRect* pRect, QString* pDrivePath) const;
+    void ejectDrive(const QString& drivePath, const QRect& buttonRect);
+    void showNotice(const QString& text);
+    QModelIndex m_ejectPressedIndex;
+    QPointer<QLabel> m_pNotice;
+    QPointer<QTimer> m_pNoticeTimer;
     // A feature whose entry was tapped before its children existed (Rekordbox finds its drives
     // after the tap): expand it as soon as they appear.
     QPersistentModelIndex m_expandWhenChildrenAppear;

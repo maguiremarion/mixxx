@@ -1,6 +1,13 @@
 #include "widget/wlibrarysidebar.h"
 
 #include <QHeaderView>
+#include <QRegularExpression>
+#include <QLabel>
+#include <QTimer>
+#include <QToolTip>
+#include <QProcess>
+#include <QPointer>
+#include <QMouseEvent>
 #include <QPen>
 #include <QPainter>
 #include <QScroller>
@@ -10,6 +17,9 @@
 
 #include "library/library_prefs.h"
 #include "library/sidebarmodel.h"
+#include "track/track.h"
+#include "mixer/playerinfo.h"
+#include "library/volumewatcher.h"
 #include "moc_wlibrarysidebar.cpp"
 #include "util/defs.h"
 #include "util/dnd.h"
@@ -116,6 +126,191 @@ void WLibrarySidebar::drawBranches(
     }
     pPainter->restore();
 }
+
+namespace {
+constexpr int kEjectButtonWidth = 40;
+const QString kDriveRowMarker = QStringLiteral("::driveRow::");
+
+#ifndef Q_OS_MACOS
+// "/dev/sda1" -> "/dev/sda", "/dev/mmcblk0p1" -> "/dev/mmcblk0"
+QString wholeDiskDevice(const QString& partition) {
+    static const QRegularExpression kPartitioned(
+            QStringLiteral("^(/dev/(?:nvme\\d+n\\d+|mmcblk\\d+))p\\d+$"));
+    static const QRegularExpression kNumbered(QStringLiteral("^(/dev/[a-z]+)\\d+$"));
+    auto match = kPartitioned.match(partition);
+    if (match.hasMatch()) {
+        return match.captured(1);
+    }
+    match = kNumbered.match(partition);
+    return match.hasMatch() ? match.captured(1) : partition;
+}
+#endif
+} // namespace
+
+bool WLibrarySidebar::ejectButtonAt(
+        const QModelIndex& index, QRect* pRect, QString* pDrivePath) const {
+    // Drive rows are marked by the Rekordbox feature: {path, state, "::driveRow::"}
+    const QList<QVariant> data = index.data(SidebarModel::DataRole).toList();
+    if (data.size() < 3 || data.at(2).toString() != kDriveRowMarker) {
+        return false;
+    }
+    const QRect row = visualRect(index);
+    if (!row.isValid()) {
+        return false;
+    }
+    const int margin = 6;
+    *pRect = QRect(viewport()->width() - kEjectButtonWidth - margin,
+            row.top() + 3,
+            kEjectButtonWidth,
+            row.height() - 6);
+    *pDrivePath = data.at(0).toString();
+    return true;
+}
+
+void WLibrarySidebar::drawRow(QPainter* pPainter,
+        const QStyleOptionViewItem& option,
+        const QModelIndex& index) const {
+    QTreeView::drawRow(pPainter, option, index);
+    QRect button;
+    QString path;
+    if (!ejectButtonAt(index, &button, &path)) {
+        return;
+    }
+    pPainter->save();
+    pPainter->setRenderHint(QPainter::Antialiasing, true);
+    pPainter->setPen(QPen(QColor(0x3a, 0x3a, 0x3a), 1));
+    pPainter->setBrush(QColor(0x26, 0x26, 0x26));
+    pPainter->drawRect(button.adjusted(0, 0, -1, -1));
+    // the eject symbol: a triangle over a bar
+    const QPointF c = button.center();
+    const qreal w = 7.0;
+    pPainter->setPen(Qt::NoPen);
+    pPainter->setBrush(QColor(0xe5, 0xe6, 0xea));
+    pPainter->drawPolygon(QPolygonF{QPointF(c.x(), c.y() - 7),
+            QPointF(c.x() - w, c.y() + 1),
+            QPointF(c.x() + w, c.y() + 1)});
+    pPainter->drawRect(QRectF(c.x() - w, c.y() + 4, 2 * w, 3));
+    pPainter->restore();
+}
+
+void WLibrarySidebar::mouseReleaseEvent(QMouseEvent* pEvent) {
+    if (pEvent->button() == Qt::LeftButton && m_ejectPressedIndex.isValid()) {
+        const QModelIndex pressed = m_ejectPressedIndex;
+        m_ejectPressedIndex = QModelIndex();
+        QRect button;
+        QString path;
+        if (ejectButtonAt(pressed, &button, &path) && button.contains(pEvent->pos())) {
+            ejectDrive(path, button);
+        }
+        pEvent->accept();
+        return;
+    }
+    QTreeView::mouseReleaseEvent(pEvent);
+}
+
+void WLibrarySidebar::showNotice(const QString& text) {
+    // A big message over the middle of the window. (A tooltip was far too small to read on the
+    // Pi's touchscreen, and a dialog can end up behind the fullscreen kiosk window; a child
+    // widget of the main window can't.) It goes away by itself, and never blocks taps.
+    QWidget* pWindow = window();
+    if (!pWindow) {
+        return;
+    }
+    if (!m_pNotice) {
+        m_pNotice = new QLabel(pWindow);
+        m_pNotice->setAlignment(Qt::AlignCenter);
+        m_pNotice->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_pNotice->setStyleSheet(QStringLiteral(
+                "background-color: #181818; color: #ffffff; border: 2px solid #3478f2;"
+                "padding: 24px 36px; font-size: 28px; font-weight: 500;"));
+        m_pNoticeTimer = new QTimer(m_pNotice);
+        m_pNoticeTimer->setSingleShot(true);
+        connect(m_pNoticeTimer, &QTimer::timeout, m_pNotice, &QWidget::hide);
+    }
+    m_pNotice->setText(text);
+    m_pNotice->setMaximumWidth(pWindow->width() * 3 / 4);
+    m_pNotice->setWordWrap(true);
+    m_pNotice->adjustSize();
+    m_pNotice->move((pWindow->width() - m_pNotice->width()) / 2,
+            (pWindow->height() - m_pNotice->height()) / 2);
+    m_pNotice->show();
+    m_pNotice->raise();
+    m_pNoticeTimer->start(4500);
+}
+
+void WLibrarySidebar::ejectDrive(const QString& drivePath, const QRect& buttonRect) {
+    Q_UNUSED(buttonRect);
+    auto say = [this](const QString& text) {
+        showNotice(text);
+    };
+
+    // Never pull a drive out from under a loaded track.
+    const QString prefix = drivePath.endsWith(QChar('/')) ? drivePath : drivePath + QChar('/');
+    PlayerInfo& playerInfo = PlayerInfo::instance();
+    QStringList busyDecks;
+    for (int deck = 1; deck <= playerInfo.numDecks(); ++deck) {
+        const TrackPointer pTrack = playerInfo.getTrackInfo(QStringLiteral("[Channel%1]").arg(deck));
+        if (pTrack && pTrack->getLocation().startsWith(prefix)) {
+            busyDecks << QString::number(deck);
+        }
+    }
+    if (!busyDecks.isEmpty()) {
+        say(tr("Drive in use by Deck %1").arg(busyDecks.join(QStringLiteral(" & "))) +
+                QChar('\n') + tr("Eject the track from the deck first."));
+        return;
+    }
+
+    QString device;
+    for (const VolumeWatcher::Volume& volume : VolumeWatcher::externalVolumes()) {
+        if (volume.rootPath == drivePath) {
+            device = volume.device;
+            break;
+        }
+    }
+
+    say(tr("Ejecting..."));
+    auto* pProcess = new QProcess(this);
+    QPointer<WLibrarySidebar> guard(this);
+    connect(pProcess,
+            &QProcess::finished,
+            this,
+            [guard, pProcess, say](int exitCode, QProcess::ExitStatus status) {
+                if (guard && (status != QProcess::NormalExit || exitCode != 0)) {
+                    say(tr("Drive is busy") + QChar('\n') + tr("Close anything using it, then try again."));
+                }
+                // On success the drive disappears and the Rekordbox list updates by itself.
+                pProcess->deleteLater();
+            });
+    connect(pProcess,
+            &QProcess::errorOccurred,
+            this,
+            [guard, pProcess, say](QProcess::ProcessError error) {
+                if (error == QProcess::FailedToStart) {
+                    if (guard) {
+                        say(tr("Can't eject"));
+                    }
+                    pProcess->deleteLater();
+                }
+            });
+#if defined(Q_OS_MACOS)
+    Q_UNUSED(device);
+    pProcess->start(QStringLiteral("/bin/sh"),
+            {QStringLiteral("-c"),
+                    QStringLiteral("/usr/sbin/diskutil eject \"$1\" || "
+                                   "/usr/sbin/diskutil unmount \"$1\""),
+                    QStringLiteral("sh"),
+                    drivePath});
+#else
+    pProcess->start(QStringLiteral("/bin/sh"),
+            {QStringLiteral("-c"),
+                    QStringLiteral("udisksctl unmount -b \"$1\" && "
+                                   "{ udisksctl power-off -b \"$2\" || true; }"),
+                    QStringLiteral("sh"),
+                    device,
+                    wholeDiskDevice(device)});
+#endif
+}
+
 
 void WLibrarySidebar::rowsInserted(const QModelIndex& parent, int start, int end) {
     QTreeView::rowsInserted(parent, start, end);
@@ -467,6 +662,19 @@ void WLibrarySidebar::keyPressEvent(QKeyEvent* pEvent) {
 }
 
 void WLibrarySidebar::mousePressEvent(QMouseEvent* pEvent) {
+    // A press on a drive's eject button selects and activates nothing: it is handled on release.
+    if (pEvent->button() == Qt::LeftButton) {
+        const QModelIndex pressed = indexAt(pEvent->pos());
+        QRect buttonRect;
+        QString drivePath;
+        if (pressed.isValid() && ejectButtonAt(pressed, &buttonRect, &drivePath) &&
+                buttonRect.contains(pEvent->pos())) {
+            m_ejectPressedIndex = pressed;
+            pEvent->accept();
+            return;
+        }
+        m_ejectPressedIndex = QModelIndex();
+    }
     // handle right click only in contextMenuEvent() to not select the clicked index
     if (pEvent->buttons().testFlag(Qt::RightButton)) {
         return;

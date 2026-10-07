@@ -22,6 +22,7 @@ class WNumberPos : public WNumber {
     void slotTimeRemainingUpdated(double);
     void slotSetDisplayMode(double);
     void slotSetTimeFormat(double);
+    void slotTrackLoadedChanged(double);
 
   private:
 
@@ -33,4 +34,5 @@ class WNumberPos : public WNumber {
     ControlProxy* m_pTimeRemaining;
     ControlProxy* m_pShowTrackTimeRemaining;
     ControlProxy* m_pTimeFormat;
+    ControlProxy* m_pTrackLoaded = nullptr; // created last: the constructor already calls slotSetTimeElapsed()
 };

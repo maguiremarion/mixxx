@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QPainter>
 #include <QSet>
+#include <QPolygonF>
 #include <QStyleOptionHeader>
 #include <QTextOption>
 #include <QWidgetAction>
@@ -596,7 +597,8 @@ void WTrackTableViewHeader::paintSection(
         }
         // QPainter still has the old font (size)
         pPainter->setFont(font());
-        pPainter->setPen(opt.palette.color(QPalette::ButtonText));
+        pPainter->setPen(m_headerTextColor.isValid() ? m_headerTextColor
+                                                     : opt.palette.color(QPalette::ButtonText));
         pPainter->drawText(textRect, title, textOption);
     }
 
@@ -612,19 +614,27 @@ void WTrackTableViewHeader::paintSection(
                 : contentRect.left() + (contentRect.width() - indicatorSize) / 2;
         opt.rect = QRect(left, indicatorTop, indicatorSize, indicatorSize);
 
-        // NOTE: Don't use drawPrimitive(PE_IndicatorHeaderArrow) because of its
-        // platform-specific arrow flipping logic in QFusionStyle::drawPrimitive
-        // (ascending = up on Linux, down on Windows/macOS) which is not used by
-        // QHeaderView's default painting via
-        // QStyleSheetStyle::drawControl(CE_Header|CE_HeaderLabel).
-        // Instead, we use the fail-safe method of drawing up/down arrows explicitly
-        // with drawPrimitive(PE_IndicatorArrowUp|Down) for consistent appearance.
-        // This also updates the widget so qss icons are applied immediately.
-        style()->drawPrimitive((sortIndicatorOrder() == Qt::AscendingOrder)
-                        ? QStyle::PE_IndicatorArrowUp
-                        : QStyle::PE_IndicatorArrowDown,
-                &opt,
-                pPainter,
-                this);
+        // The arrow is drawn here, as a plain filled triangle in the title colour. The style's
+        // PE_IndicatorArrowUp/Down paints with the palette, which is black on the Pi (Fusion
+        // ignores the qss colour), so the arrow was hard to see. (PE_IndicatorHeaderArrow isn't
+        // used either: its up/down flipping differs per platform.)
+        PainterScope painterScope(pPainter);
+        pPainter->setRenderHint(QPainter::Antialiasing, true);
+        pPainter->setPen(Qt::NoPen);
+        pPainter->setBrush(m_headerTextColor.isValid() ? m_headerTextColor
+                                                       : opt.palette.color(QPalette::ButtonText));
+        const QRectF r(opt.rect);
+        const qreal margin = r.width() * 0.1;
+        QPolygonF triangle;
+        if (sortIndicatorOrder() == Qt::AscendingOrder) {
+            triangle << QPointF(r.center().x(), r.top() + margin)
+                     << QPointF(r.right() - margin, r.bottom() - margin)
+                     << QPointF(r.left() + margin, r.bottom() - margin);
+        } else {
+            triangle << QPointF(r.left() + margin, r.top() + margin)
+                     << QPointF(r.right() - margin, r.top() + margin)
+                     << QPointF(r.center().x(), r.bottom() - margin);
+        }
+        pPainter->drawPolygon(triangle);
     }
 }

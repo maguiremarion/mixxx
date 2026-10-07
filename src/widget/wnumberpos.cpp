@@ -29,6 +29,15 @@ WNumberPos::WNumberPos(const QString& group, QWidget* parent)
     m_pTimeFormat->connectValueChanged(
             this, &WNumberPos::slotSetTimeFormat);
     slotSetTimeFormat(m_pTimeFormat->get());
+
+    // The position controls keep their last values when the track is ejected, so without this the
+    // old time stayed on screen.
+    m_pTrackLoaded = new ControlProxy(group, "track_loaded", this, ControlFlag::NoAssertIfMissing);
+    m_pTrackLoaded->connectValueChanged(this, &WNumberPos::slotTrackLoadedChanged);
+}
+
+void WNumberPos::slotTrackLoadedChanged(double) {
+    slotSetTimeElapsed(m_pTimeElapsed->get());
 }
 
 void WNumberPos::mousePressEvent(QMouseEvent* pEvent) {
@@ -65,6 +74,11 @@ void WNumberPos::showEvent(QShowEvent* pEvent) {
 }
 
 void WNumberPos::slotSetTimeElapsed(double dTimeElapsed) {
+    // An empty deck shows zero time, whatever the position controls still hold.
+    const bool trackLoaded = !m_pTrackLoaded || m_pTrackLoaded->toBool();
+    if (!trackLoaded) {
+        dTimeElapsed = 0.0;
+    }
     m_dOldTimeElapsed = dTimeElapsed;
     // With hundredths of a second shown the text changes on every frame. A widget on a page that
     // isn't visible (the Browse / settings pages each carry their own time displays) would
@@ -72,7 +86,7 @@ void WNumberPos::slotSetTimeElapsed(double dTimeElapsed) {
     if (!isVisible()) {
         return;
     }
-    double dTimeRemaining = m_pTimeRemaining->get();
+    double dTimeRemaining = trackLoaded ? m_pTimeRemaining->get() : 0.0;
     QString (*timeFormat)(double dSeconds, mixxx::Duration::Precision precision);
 
     if (m_displayFormat == TrackTime::DisplayFormat::KILO_SECONDS) {

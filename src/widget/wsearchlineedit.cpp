@@ -6,6 +6,7 @@
 #include <QFont>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QProcess>
 #include <QShortcut>
 #include <QSizePolicy>
 #include <QStringLiteral>
@@ -17,6 +18,7 @@
 #include "util/assert.h"
 #include "util/logger.h"
 #include "util/parented_ptr.h"
+#include "widget/wonscreenkeyboard.h"
 #include "wskincolor.h"
 
 #define ENABLE_TRACE_LOG false
@@ -449,6 +451,40 @@ void WSearchLineEdit::keyPressEvent(QKeyEvent* keyEvent) {
     QComboBox::keyPressEvent(keyEvent);
 }
 
+namespace {
+
+// On-screen keyboard for the touchscreen build, shown while the search box has the focus.
+void setOnScreenKeyboardVisible(bool visible, QWidget* pSearchBox) {
+    // MIXXX_OSK: "app" = Mixxx's own keyboard (default on Linux: the Pi kiosk is fullscreen and its
+    // compositor draws it above the system keyboard), "system" = ask Squeekboard over DBus,
+    // "off" = nothing. Other platforms: off, unless MIXXX_OSK=app (handy for testing).
+    QString mode = qEnvironmentVariable("MIXXX_OSK");
+#if defined(Q_OS_LINUX)
+    if (mode.isEmpty()) {
+        mode = QStringLiteral("app");
+    }
+#endif
+    if (mode == QLatin1String("app")) {
+        if (visible) {
+            WOnScreenKeyboard::showIn(pSearchBox->window());
+        } else {
+            WOnScreenKeyboard::hideKeyboard();
+        }
+        return;
+    }
+#if defined(Q_OS_LINUX)
+    if (mode == QLatin1String("system")) {
+        QProcess::startDetached(QStringLiteral("/bin/sh"),
+                {QStringLiteral("-c"),
+                        QStringLiteral("busctl --user call sm.puri.OSK0 /sm/puri/OSK0 "
+                                       "sm.puri.OSK0 SetVisible b %1 >/dev/null 2>&1")
+                                .arg(visible ? QStringLiteral("true") : QStringLiteral("false"))});
+    }
+#endif
+}
+
+} // namespace
+
 void WSearchLineEdit::focusInEvent(QFocusEvent* event) {
     if (kLogger.traceEnabled()) {
         kLogger.trace()
@@ -457,6 +493,7 @@ void WSearchLineEdit::focusInEvent(QFocusEvent* event) {
     QComboBox::focusInEvent(event);
     updateCompleter();
     updateClearAndDropdownButton(currentText());
+    setOnScreenKeyboardVisible(true, this);
 }
 
 void WSearchLineEdit::focusOutEvent(QFocusEvent* event) {
@@ -466,6 +503,7 @@ void WSearchLineEdit::focusOutEvent(QFocusEvent* event) {
     }
     slotSaveSearch();
     QComboBox::focusOutEvent(event);
+    setOnScreenKeyboardVisible(false, this);
     if (m_debouncingTimer.isActive()) {
         // Trigger a pending search before leaving the edit box.
         // Otherwise the entered text might be ignored and get lost

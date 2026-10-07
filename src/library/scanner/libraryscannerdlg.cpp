@@ -108,9 +108,8 @@ void LibraryScannerDlg::updateProgressBar() {
 void LibraryScannerDlg::slotUpdate(const QString& path) {
     // qDebug() << "LibraryScannerDlg slotUpdate" <<
     // m_timer.elapsed().formatMillisWithUnit() << path;
-    if (!m_bCancelled && m_timer.elapsed() > mixxx::Duration::fromSeconds(2)) {
-       setVisible(true);
-    }
+    // The "taking a minute to scan" window is never shown in this build: it covered the screen
+    // on the Pi's touchscreen. The scan still runs in the background.
 
     m_tasksDone++;
 
@@ -122,9 +121,8 @@ void LibraryScannerDlg::slotUpdate(const QString& path) {
 
 void LibraryScannerDlg::slotUpdateCover(const QString& path) {
     // qDebug() << "LibraryScannerDlg slotUpdate" << m_timer.elapsed() << path;
-    if (!m_bCancelled && m_timer.elapsed() > mixxx::Duration::fromSeconds(2)) {
-        setVisible(true);
-    }
+    // The "taking a minute to scan" window is never shown in this build: it covered the screen
+    // on the Pi's touchscreen. The scan still runs in the background.
 
     m_tasksDone++;
     if (isVisible()) {
@@ -137,9 +135,8 @@ void LibraryScannerDlg::slotUpdateCover(const QString& path) {
 
 void LibraryScannerDlg::slotUpdateSubstitute(const QString& path) {
     // qDebug() << "LibraryScannerDlg slotUpdateSubstitute" << m_timer.elapsed() << path;
-    if (!m_bCancelled && m_timer.elapsed() > mixxx::Duration::fromSeconds(2)) {
-        setVisible(true);
-    }
+    // The "taking a minute to scan" window is never shown in this build: it covered the screen
+    // on the Pi's touchscreen. The scan still runs in the background.
 
     if (isVisible()) {
         const QString status = QString("%1: %2").arg(tr("Looking for substitute for"), path);

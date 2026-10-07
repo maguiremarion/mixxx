@@ -145,7 +145,7 @@ PlayerManager::~PlayerManager() {
 
     const auto locker = lockMutex(&m_mutex);
 
-    m_pSamplerBank->saveSamplerBankToPath(getDefaultSamplerPath(m_pConfig));
+    // (The sampler bank is neither saved nor restored in this build: see loadSamplers().)
     // No need to delete anything because they are all parented to us and will
     // be destroyed when we are destroyed.
     m_players.clear();
@@ -234,7 +234,10 @@ bool PlayerManager::isPreviewDeckGroup(const QString& group, int* number) {
 
 void PlayerManager::slotChangeNumDecks(double v) {
     const auto locker = lockMutex(&m_mutex);
-    int num = (int)v;
+    // This build is for 2-deck use, whoever asks for more (a skin's num_decks setting, a saved
+    // sound config, a controller script): see addConfiguredDecks().
+    constexpr int kMaxDecksInThisBuild = 2;
+    int num = std::min(static_cast<int>(v), kMaxDecksInThisBuild);
 
     VERIFY_OR_DEBUG_ASSERT(num <= kMaxNumberOfDecks) {
         qWarning() << "Number of decks exceeds the maximum we expect."
@@ -407,7 +410,9 @@ void PlayerManager::addDeckInner() {
 }
 
 void PlayerManager::loadSamplers() {
-    m_pSamplerBank->loadSamplerBankFromPath(getDefaultSamplerPath(m_pConfig));
+    // This build has no samplers. Mixxx saves the sampler bank on exit and restores it here: a
+    // file saved by an older run (when a controller script had added 16 samplers) would bring
+    // all 16 back, each with an engine channel and a reader thread.
 }
 
 void PlayerManager::addSampler() {

@@ -154,11 +154,15 @@ class MixxxMainWindow : public QMainWindow {
     DlgPreferences* m_pPrefDlg;
     // [App],show_preferences: lets a skin button / controller open Preferences.
     std::unique_ptr<ControlPushButton> m_pShowPreferences;
-    // [App],restart: quit the normal way (same "a deck is playing" prompt), then start Mixxx
+    // [App],restart: quit (without the "a deck is playing" prompt), then start Mixxx
     // again with the same arguments. Handy after plugging in a controller, which Mixxx only
     // detects at startup.
     std::unique_ptr<ControlPushButton> m_pRestartApp;
     bool m_restartRequested = false;
+    // [App],quit: quit without asking.
+    std::unique_ptr<ControlPushButton> m_pQuitApp;
+    bool m_skipExitConfirmation = false;
+    void quitWithoutPrompt();
     // [App],rescan_library / [App],library_scan_active: Library > Rescan Library
     // (Ctrl+Shift+L) as controls for skins and controllers.
     std::unique_ptr<ControlPushButton> m_pRescanLibrary;

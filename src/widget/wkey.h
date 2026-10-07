@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QColor>
+
 #include "control/controlproxy.h"
 #include "preferences/colorpalettesettings.h"
 #include "proto/keys.pb.h"
@@ -9,6 +11,18 @@ class WKey : public WLabel  {
     Q_OBJECT
   public:
     explicit WKey(const QString& group, UserSettingsPointer pConfig, QWidget* pParent = nullptr);
+
+    /// Colour of the key text, set by the skin (qproperty-keyTextColor in the QSS). The label draws
+    /// its own text, and the colour a QSS `color:` rule leaves in the palette differs between
+    /// styles: it came out black on the Pi (Fusion) while fine on macOS.
+    Q_PROPERTY(QColor keyTextColor READ keyTextColor WRITE setKeyTextColor)
+    QColor keyTextColor() const {
+        return m_keyTextColor;
+    }
+    void setKeyTextColor(const QColor& color) {
+        m_keyTextColor = color;
+        update();
+    }
 
     void onConnectedControlChanged(double dParameter, double dValue) override;
     void setup(const QDomNode& node, const SkinContext& context) override;
@@ -33,5 +47,6 @@ class WKey : public WLabel  {
     ControlProxy m_engineKey;
     ColorPaletteSettings m_colorPaletteSettings;
     mixxx::track::io::key::ChromaticKey m_key;
+    QColor m_keyTextColor = QColor(0xe5, 0xe6, 0xea);
     void paintEvent(QPaintEvent* event) override;
 };

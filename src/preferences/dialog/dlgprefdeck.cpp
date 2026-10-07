@@ -23,8 +23,10 @@ constexpr double kDefaultTemporaryRateChangeFine = 2.00;
 constexpr double kDefaultPermanentRateChangeCoarse = 0.50;
 constexpr double kDefaultPermanentRateChangeFine = 0.05;
 constexpr int kDefaultRateRampSensitivity = 250;
+// Stock Mixxx defaults to "elapsed and remaining", which this build doesn't offer (it doesn't
+// fit the compact time box), so a fresh config showed no usable time.
 constexpr double kDefaultPositionDisplayType =
-        static_cast<double>(TrackTime::DisplayMode::ELAPSED_AND_REMAINING);
+        static_cast<double>(TrackTime::DisplayMode::ELAPSED);
 // bool kDefaultCloneDeckOnLoad is defined in header file to make it available
 // to playermanager.cpp
 const QString kAppGroup = QStringLiteral("[App]");
@@ -84,6 +86,7 @@ DlgPrefDeck::DlgPrefDeck(QWidget* parent, UserSettingsPointer pConfig)
             this,
             QOverload<double>::of(&DlgPrefDeck::slotSetTrackTimeDisplay));
 
+    radioButtonElapsedAndRemaining->hide();
     double positionDisplayType = m_pConfig->getValue(
             ConfigKey(kControlsGroup, QStringLiteral("PositionDisplay")),
             kDefaultPositionDisplayType);
@@ -92,12 +95,8 @@ DlgPrefDeck::DlgPrefDeck(QWidget* parent, UserSettingsPointer pConfig)
         radioButtonRemaining->setChecked(true);
         m_pControlTrackTimeDisplay->set(
             static_cast<double>(TrackTime::DisplayMode::REMAINING));
-    } else if (positionDisplayType ==
-                   static_cast<double>(TrackTime::DisplayMode::ELAPSED_AND_REMAINING)) {
-        radioButtonElapsedAndRemaining->setChecked(true);
-        m_pControlTrackTimeDisplay->set(
-            static_cast<double>(TrackTime::DisplayMode::ELAPSED_AND_REMAINING));
     } else {
+        // Includes a saved "elapsed and remaining" (2): not offered in this build.
         radioButtonElapsed->setChecked(true);
         m_pControlTrackTimeDisplay->set(
             static_cast<double>(TrackTime::DisplayMode::ELAPSED));

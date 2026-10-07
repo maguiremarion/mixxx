@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QHeaderView>
 #include <QMap>
 #include <QMenu>
@@ -84,6 +85,19 @@ class WTrackTableViewHeader : public QHeaderView {
 
     // Required to set the preferred height with custom padding
     QSize sizeHint() const override;
+
+    /// Colour of the column titles, set by the skin (qproperty-headerTextColor in the QSS). The
+    /// palette colour a `::section { color: }` rule leaves behind differs between styles: the
+    /// titles came out black on the Pi (Fusion style) while fine on macOS. Invalid = use the
+    /// palette like stock Mixxx.
+    Q_PROPERTY(QColor headerTextColor READ headerTextColor WRITE setHeaderTextColor)
+    QColor headerTextColor() const {
+        return m_headerTextColor;
+    }
+    void setHeaderTextColor(const QColor& color) {
+        m_headerTextColor = color;
+        viewport()->update();
+    }
     // Work around Qt6 paint bug with sort indicator
     void paintSection(QPainter* pPainter, const QRect& rect, int logicalIndex) const override;
 
@@ -94,6 +108,7 @@ class WTrackTableViewHeader : public QHeaderView {
     void showOrHideColumn(int);
 
   private:
+    QColor m_headerTextColor;
     int hiddenCount();
     void clearActions();
     TrackModel* getTrackModel();

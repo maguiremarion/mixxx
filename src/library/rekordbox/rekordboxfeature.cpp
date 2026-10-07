@@ -48,6 +48,8 @@
 
 #define IS_RECORDBOX_DEVICE "::isRecordboxDevice::"
 #define IS_NOT_RECORDBOX_DEVICE "::isNotRecordboxDevice::"
+// Third element of a drive row's data: lets the sidebar draw an eject button on it.
+#define IS_DRIVE_ROW "::driveRow::"
 
 namespace {
 
@@ -228,6 +230,8 @@ QList<TreeItem*> findRekordboxDevices() {
             QList<QString> data;
             data << drive.filePath();
             data << IS_RECORDBOX_DEVICE;
+            data << IS_DRIVE_ROW;
+            data << IS_DRIVE_ROW;
             auto* pFoundDevice = new TreeItem(
                     std::move(displayPath),
                     QVariant(data));
@@ -256,7 +260,7 @@ QList<TreeItem*> findRekordboxDevices() {
         if (!findRekordboxPdbPath(device.filePath()).isEmpty()) {
             auto* pFoundDevice = new TreeItem(
                     device.fileName(),
-                    QVariant(QList<QString>{device.filePath(), IS_RECORDBOX_DEVICE}));
+                    QVariant(QList<QString>{device.filePath(), IS_RECORDBOX_DEVICE, IS_DRIVE_ROW}));
             foundDevices << pFoundDevice;
         }
     }
@@ -268,6 +272,7 @@ QList<TreeItem*> findRekordboxDevices() {
             QList<QString> data;
             data << device.filePath();
             data << IS_RECORDBOX_DEVICE;
+            data << IS_DRIVE_ROW;
             auto* pFoundDevice = new TreeItem(
                     device.fileName(),
                     QVariant(data));
@@ -1662,23 +1667,27 @@ CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
 QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
     // The playlist position (#, sorted ascending by default for a playlist), cover art, then the
     // things you pick a track by, then the overview waveform. The widths add up to 766 px: the
-    // width the table gets on a 1024 px wide screen (sidebar 230, scrollbar 28). Everything else
+    // width the table gets on a 1024 px wide screen (sidebar 230, scrollbar 28), minus a safety margin
+    // so it never needs to scroll sideways. Everything else
     // is hidden (turn it back on from the header's right-click menu). Bump
     // defaultColumnLayoutVersion() when changing this so it replaces saved layouts.
     return {
             {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 198},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 192},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 141},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 51},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 74},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 174},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 80},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 146},
     };
 }
 
 int RekordboxPlaylistModel::defaultColumnLayoutVersion() const {
-    return 1;
+    // 2: overview narrowed so the columns fit without sideways scrolling
+    // 3: a few px moved from the title to Duration, whose title was cut off
+    // 4: Duration trimmed back a little (86 -> 80)
+    return 4;
 }
 
 bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {
@@ -1802,10 +1811,10 @@ void RekordboxFeature::showLoadingPage(
     m_loadingHeading = heading;
     m_loadingMessage = message;
     m_loadingAnimate = animate;
-    m_loadingDots = 0;
+    m_loadingDots = 1; // never start on a bare line: show dots from the first frame
     updateLoadingPage();
     if (animate) {
-        m_loadingTimer.start(400);
+        m_loadingTimer.start(150); // brisk, so it's clear something is happening
     } else {
         m_loadingTimer.stop();
     }
@@ -1930,10 +1939,9 @@ QString RekordboxFeature::formatRootViewHtml() const {
     // looks again as well.
     const QString title = tr("Rekordbox Libraries");
     const QString summary = tr(
-            "Drives exported from Rekordbox will show up in the list on the left under the 'Rekordbox' dropdown.");
+            "Drives exported from Rekordbox will show up in the 'Rekordbox' dropdown on the left.");
     const QString detail = tr(
-            "Tap a drive to browse All Tracks or Playlists. A drive is picked up automatically "
-            "when it is plugged in, and read in the background.");
+            "This will load all tracks, playlists, beatgrids, and cues from the drive. A drive is picked up automatically when it is plugged in and read in the background.");
 
     QString html;
     html.append(QString("<h1>%1</h1>").arg(title));
@@ -1947,6 +1955,7 @@ void RekordboxFeature::refreshLibraryModels() {
 
 void RekordboxFeature::activate() {
     qDebug() << "RekordboxFeature::activate()";
+    ++m_openToken; // a playlist that was about to open is no longer wanted
 
     // Let a worker thread do the XML parsing
     m_devicesFuture = QtConcurrent::run(findRekordboxDevices);
@@ -1987,17 +1996,38 @@ void RekordboxFeature::activateChild(const QModelIndex& index) {
     qDebug() << "RekordboxFeature::activateChild " << item->getLabel()
              << " playlist: " << playlist << " doParseDeviceDB: " << doParseDeviceDB;
 
+    const bool isDriveRow = data.size() >= 3 && data[2].toString() == IS_DRIVE_ROW;
     if (doParseDeviceDB) {
         startDeviceParse(item, true);
     } else if (!m_parsingDevicePath.isEmpty() && playlist == m_parsingDevicePath) {
         // Tapped while it is still being read (it was started in the background).
         m_showWhenParsed = playlist;
         showLoadingPage(item->getLabel(), tr("Reading drive"), true);
+    } else if (isDriveRow) {
+        // A drive that is already read: a tap only opens or closes it (the sidebar does that).
+        // Its tracks are under "All Tracks"; loading them here made every tap on the drive slow.
+        return;
     } else {
+        openPlaylistDeferred(item->getLabel(), playlist);
+    }
+}
+
+void RekordboxFeature::openPlaylistDeferred(const QString& label, const QString& playlist) {
+    // Show the "Loading" page now and do the heavy part (building the track list: an SQL query,
+    // the column setup, the delegates) a moment later, once that page has been painted. The tap
+    // answers at once; only the list itself takes its time. A newer tap supersedes this one.
+    // The dots are static: this all runs on the UI thread, where an animation can't move
+    // anyway, and trying to made the stall worse.
+    const quint64 token = ++m_openToken;
+    showLoadingPage(label, tr("Loading tracks..."), false);
+    QTimer::singleShot(60, this, [this, token, playlist]() {
+        if (token != m_openToken) {
+            return;
+        }
         qDebug() << "Activate Rekordbox Playlist: " << playlist;
         m_pRekordboxPlaylistModel->setPlaylist(playlist);
         emit showTrackModel(m_pRekordboxPlaylistModel);
-    }
+    });
 }
 
 namespace {
@@ -2157,9 +2187,9 @@ void RekordboxFeature::onTracksFound() {
         const bool stillWaiting = m_pLoadingView && m_pLoadingView->isVisible();
         if (ok) {
             if (stillWaiting) {
-                qDebug() << "Show Rekordbox Device Playlist: " << devicePlaylist;
-                m_pRekordboxPlaylistModel->setPlaylist(devicePlaylist);
-                emit showTrackModel(m_pRekordboxPlaylistModel);
+                // The drive is read and has opened in the sidebar: its tracks and playlists are
+                // there to tap. (Don't load a list nobody asked for.)
+                emit switchToView("REKORDBOXHOME");
             }
         } else if (stillWaiting) {
             showLoadingPage(tr("Couldn't read this drive"),

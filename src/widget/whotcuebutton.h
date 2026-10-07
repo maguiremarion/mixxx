@@ -71,6 +71,8 @@ class WHotcueButton : public WPushButton {
     /// Use getCueMenuPopup() instead to ensure the menu is populated.
     parented_ptr<WCueMenuPopup> m_pCueMenuPopup;
     QTimer m_longPressTimer;
+    /// A left press on a set pad that hasn't been sent to the deck yet (tap or hold?).
+    bool m_pendingPress = false;
     QPoint m_pressPos;
     int m_cueColorDimThreshold;
     bool m_bCueColorDimmed;

@@ -7,6 +7,7 @@
 #include <QOpenGLContext>
 #include <QProcess>
 #include <QTimer>
+#include <cstdlib>
 #include <QUrl>
 
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -358,7 +359,20 @@ void MixxxMainWindow::initialize() {
             [this](double value) {
                 if (value > 0.0) {
                     m_restartRequested = true;
-                    close();
+                    quitWithoutPrompt();
+                }
+            });
+    // [App],quit: quit now. Same reasoning as restart: the buttons are deliberate, and on the
+    // Pi's fullscreen kiosk the "a deck is playing" question can end up behind the window, so
+    // the button looked dead.
+    m_pQuitApp = std::make_unique<ControlPushButton>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("quit")));
+    connect(m_pQuitApp.get(),
+            &ControlPushButton::valueChanged,
+            this,
+            [this](double value) {
+                if (value > 0.0) {
+                    quitWithoutPrompt();
                 }
             });
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
@@ -1668,11 +1682,24 @@ bool MixxxMainWindow::eventFilter(QObject* obj, QEvent* event) {
     return QMainWindow::eventFilter(obj, event);
 }
 
+void MixxxMainWindow::quitWithoutPrompt() {
+    m_skipExitConfirmation = true;
+    if (m_pPrefDlg && m_pPrefDlg->isVisible()) {
+        m_pPrefDlg->close();
+    }
+    close();
+    // close() only ends the program if this was the last window. Ask explicitly.
+    QCoreApplication::quit();
+    // If shutting down hangs (the Pi's slow SD card, a stuck thread), don't leave the kiosk
+    // with a dead screen and no way out.
+    QTimer::singleShot(15000, qApp, []() { std::_Exit(0); });
+}
+
 void MixxxMainWindow::closeEvent(QCloseEvent *event) {
     // WARNING: We can receive a CloseEvent while only partially
     // initialized. This is because we call QApplication::processEvents to
     // render LaunchImage progress in the constructor.
-    if (!confirmExit()) {
+    if (!m_skipExitConfirmation && !confirmExit()) {
         m_restartRequested = false; // exit refused, so no restart either
         event->ignore();
         return;

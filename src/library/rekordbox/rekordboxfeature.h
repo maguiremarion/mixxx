@@ -131,6 +131,7 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
     void startNextQueuedParse();
     TreeItem* findDeviceItem(const QString& devicePath) const;
     void showLoadingPage(const QString& heading, const QString& message, bool animate);
+    void openPlaylistDeferred(const QString& label, const QString& playlist);
     void updateLoadingPage();
     std::unique_ptr<BaseSqlTableModel> createPlaylistModelForPlaylist(
             const QVariant& data) override;
@@ -149,6 +150,7 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
     QString m_parsingDevicePath;   // the device being read right now (empty = idle)
     QString m_showWhenParsed;      // show this device's tracks when it finishes (it was tapped)
     QPointer<WLibraryTextBrowser> m_pLoadingView;
+    quint64 m_openToken = 0;
     QTimer m_loadingTimer;
     QString m_loadingHeading;
     QString m_loadingMessage;

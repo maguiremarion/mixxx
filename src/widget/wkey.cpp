@@ -152,23 +152,22 @@ void WKey::paintEvent(QPaintEvent* event) {
     const bool centered = (alignment() & Qt::AlignHCenter) != 0;
     const int startX = centered ? std::max(0, (width() - textWidth - gap - squareSize) / 2) : 0;
 
-    painter.setPen(option.palette.color(foregroundRole()));
+    painter.setPen(m_keyTextColor);
     painter.drawText(QRect(startX, 0, textWidth + 2, height()),
             Qt::AlignLeft | Qt::AlignVCenter,
             elidedText);
 
-    // Centre the square on the capital letters, not on the row: the text is centred as a whole
-    // line (ascent + descent), so its capitals sit a little above the middle of the row.
+    // The square sits on the text's baseline: its bottom is level with the bottom of the letters
+    // (the key names have no descenders), and it grows upwards from there.
     const int baseline = (height() - (fontMetrics.ascent() + fontMetrics.descent())) / 2 +
             fontMetrics.ascent();
-    const int squareCenterY = baseline - static_cast<int>(fontMetrics.capHeight() / 2);
     painter.setRenderHint(QPainter::Antialiasing, true);
     painter.setPen(Qt::NoPen);
     painter.setBrush(squareColor);
     painter.drawRoundedRect(QRectF(startX + textWidth + gap,
-                                    squareCenterY - squareSize / 2.0,
+                                    baseline - squareSize,
                                     squareSize,
                                     squareSize),
-            squareSize * 0.3,
-            squareSize * 0.3);
+            squareSize * 0.12,
+            squareSize * 0.12);
 }

@@ -243,12 +243,19 @@ void WHotcueButton::mousePressEvent(QMouseEvent* pEvent) {
         // Only a pad that is already set can be long-pressed (pressing an empty pad
         // sets a cue, which must not immediately arm the delete popup).
         const bool wasSet = readDisplayValue() != 0;
+        m_pendingPress = false;
+        if (wasSet && pEvent->button() == Qt::LeftButton) {
+            // A set pad can be tapped (jump to the cue) or held (delete popup). Don't tell the
+            // deck anything yet, or a hold would always jump first: a tap is sent when the
+            // finger lifts, a hold never jumps.
+            DragAndDropHelper::mousePressed(pEvent);
+            m_pressPos = pEvent->pos();
+            m_pendingPress = true;
+            m_longPressTimer.start();
+            return;
+        }
         WPushButton::mousePressEvent(pEvent);
         DragAndDropHelper::mousePressed(pEvent);
-        if (wasSet && pEvent->button() == Qt::LeftButton) {
-            m_pressPos = pEvent->pos();
-            m_longPressTimer.start();
-        }
     }
 }
 
@@ -258,15 +265,9 @@ void WHotcueButton::showDeletePopup() {
         return;
     }
 
-    // Let go of the pad first (stops the preview): a Qt::Popup grabs the mouse, so it
-    // would otherwise get the release and leave this button stuck in the pressed state.
-    QMouseEvent release(QEvent::MouseButtonRelease,
-            m_pressPos,
-            mapToGlobal(m_pressPos),
-            Qt::LeftButton,
-            Qt::NoButton,
-            Qt::NoModifier);
-    WPushButton::mouseReleaseEvent(&release);
+    // It was a hold, not a tap: the press was never sent, so there is nothing to let go of (and
+    // the pad must not jump). The popup grabs the mouse, so the finger's release goes to it.
+    m_pendingPress = false;
 
     auto* pPopup = new QFrame(this, Qt::Popup);
     pPopup->setObjectName(QStringLiteral("CueDeletePopup"));
@@ -308,6 +309,20 @@ void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
         return;
     }
     m_longPressTimer.stop();
+    if (m_pendingPress) {
+        // A tap on a set pad: send the press now, then the release.
+        m_pendingPress = false;
+        if (!rect().contains(pEvent->pos())) {
+            return; // lifted outside the pad: cancelled
+        }
+        QMouseEvent press(QEvent::MouseButtonPress,
+                pEvent->position(),
+                pEvent->globalPosition(),
+                Qt::LeftButton,
+                Qt::LeftButton,
+                pEvent->modifiers());
+        WPushButton::mousePressEvent(&press);
+    }
     WPushButton::mouseReleaseEvent(pEvent);
 }
 
@@ -315,7 +330,7 @@ void WHotcueButton::mouseMoveEvent(QMouseEvent* pEvent) {
     // Moving away (or starting a drag-swap) cancels the long press.
     if (m_longPressTimer.isActive() &&
             (pEvent->pos() - m_pressPos).manhattanLength() > QApplication::startDragDistance()) {
-        m_longPressTimer.stop();
+        m_longPressTimer.stop(); // moved: no longer a hold (a lift still counts as a tap)
     }
     TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
     if (!pTrack) {
@@ -348,6 +363,7 @@ void WHotcueButton::mouseMoveEvent(QMouseEvent* pEvent) {
         const QPixmap currLook = grab(rect().marginsRemoved(m_dndRectMargins));
         pDrag->setDragCursor(currLook, Qt::MoveAction);
 
+        m_pendingPress = false; // a drag-swap, not a tap: the pad never jumps
         m_dragging = true;
         pDrag->exec();
         m_dragging = false;
