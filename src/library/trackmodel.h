@@ -172,6 +172,12 @@ class TrackModel {
     virtual int defaultColumnLayoutVersion() const {
         return 0;
     }
+    /// One column of defaultColumnLayout() may be "flexible": the header widens it just enough
+    /// for its title to fit (taking the pixels from the widest other column); every other
+    /// column keeps its fixed width. -1 = none.
+    virtual int defaultFlexibleColumn() const {
+        return -1;
+    }
     virtual const QList<int>& searchColumns() const { return m_emptyColumns; }
 
     virtual void removeTracks(const QModelIndexList& indices) {

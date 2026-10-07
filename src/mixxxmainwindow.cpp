@@ -22,6 +22,7 @@
 #ifdef MIXXX_USE_QOPENGL
 #include <QGuiApplication>
 
+#include "widget/wnotice.h"
 #include "widget/tooltipqopengl.h"
 #include "widget/winitialglwidget.h"
 #endif
@@ -397,6 +398,23 @@ void MixxxMainWindow::initialize() {
         QProcess::startDetached(QStringLiteral("/bin/sh"), shellArgs);
 #endif
     });
+
+    // Tapping a deck's eject button while it plays does nothing (Mixxx ignores eject then, and
+    // the skin dims the button). Say why, beside the finger.
+    for (int deck = 1; deck <= 2; ++deck) {
+        const QString group = QStringLiteral("[Channel%1]").arg(deck);
+        auto pEject = std::make_unique<ControlProxy>(
+                group, QStringLiteral("eject"), this, ControlFlag::NoAssertIfMissing);
+        pEject->connectValueChanged(this, [this, group, deck](double value) {
+            if (value > 0.0 && ControlObject::toBool(ConfigKey(group, QStringLiteral("play")))) {
+                WNotice::show(this,
+                        tr("Pause Deck %1 before ejecting").arg(deck),
+                        mapFromGlobal(QCursor::pos()) + QPoint(0, 28),
+                        true);
+            }
+        });
+        m_ejectProxies.push_back(std::move(pEject));
+    }
 
     // Library > Rescan Library (Ctrl+Shift+L) as controls, so a skin button can
     // start it and show progress. Same rule as above: create them BEFORE the

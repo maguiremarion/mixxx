@@ -93,10 +93,8 @@ class WLibrarySidebar : public QTreeView, public WBaseWidget {
     // A removable drive's row (Rekordbox drives) has an eject button at its right end.
     bool ejectButtonAt(const QModelIndex& index, QRect* pRect, QString* pDrivePath) const;
     void ejectDrive(const QString& drivePath, const QRect& buttonRect);
-    void showNotice(const QString& text);
+    void showNotice(const QString& text, const QRect& anchorRect);
     QModelIndex m_ejectPressedIndex;
-    QPointer<QLabel> m_pNotice;
-    QPointer<QTimer> m_pNoticeTimer;
     // A feature whose entry was tapped before its children existed (Rekordbox finds its drives
     // after the tap): expand it as soon as they appear.
     QPersistentModelIndex m_expandWhenChildrenAppear;

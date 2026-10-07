@@ -61,10 +61,12 @@ class WTrackTableViewHeader : public QHeaderView {
 
     void contextMenuEvent(QContextMenuEvent* event) override;
     void setModel(QAbstractItemModel* model) override;
+    void showEvent(QShowEvent* pEvent) override;
 
     void saveHeaderState();
     void restoreHeaderState();
     void loadDefaultHeaderState();
+    void fitDefaultColumnsToTitles(const QList<QPair<int, int>>& layout);
     // Returns false if the header state is not stored in the database (on first time usage)
     bool hasPersistedHeaderState();
 
@@ -109,6 +111,10 @@ class WTrackTableViewHeader : public QHeaderView {
 
   private:
     QColor m_headerTextColor;
+    /// The default layout's titles still have to be measured, once the header is shown and
+    /// styled (measured earlier, the skin's padding and font aren't applied yet).
+    bool m_fitPending = false;
+    QList<QPair<int, int>> m_fitLayout;
     int hiddenCount();
     void clearActions();
     TrackModel* getTrackModel();

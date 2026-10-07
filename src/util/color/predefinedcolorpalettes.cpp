@@ -2,14 +2,17 @@
 
 namespace {
 
-// Default Mixxx Hotcue Color Palette
-constexpr mixxx::RgbColor kColorMixxxRed(0xC50A08);
-constexpr mixxx::RgbColor kColorMixxxGreen(0x32BE44);
-constexpr mixxx::RgbColor kColorMixxxCeleste(0x42D4F4);
-constexpr mixxx::RgbColor kColorMixxxYellow(0xF8D200);
-constexpr mixxx::RgbColor kColorMixxxBlue(0x0044FF);
-constexpr mixxx::RgbColor kColorMixxxPurple(0xAF00CC);
-constexpr mixxx::RgbColor kColorMixxxPink(0xFCA6D7);
+// Default Mixxx Hotcue Color Palette, in this build: one colour per pad, A to H, taken from
+// Rekordbox's own hot cue colours (see below): A red, B blue, C green, D purple, E dark green,
+// F orange, G dark blue, H yellow.
+constexpr mixxx::RgbColor kColorMixxxPadA(0xE62828);
+constexpr mixxx::RgbColor kColorMixxxPadB(0x50B4FF);
+constexpr mixxx::RgbColor kColorMixxxPadC(0x28E214);
+constexpr mixxx::RgbColor kColorMixxxPadD(0xB432FF);
+constexpr mixxx::RgbColor kColorMixxxPadE(0x10B176);
+constexpr mixxx::RgbColor kColorMixxxPadF(0xE0641B);
+constexpr mixxx::RgbColor kColorMixxxPadG(0x305AFF);
+constexpr mixxx::RgbColor kColorMixxxPadH(0xC3AF04);
 constexpr mixxx::RgbColor kColorMixxxWhite(0xF2F2FF);
 
 // Default Mixxx Track Color Palette
@@ -253,14 +256,14 @@ const ColorPalette PredefinedColorPalettes::kMixxxHotcueColorPalette =
         ColorPalette(
                 QStringLiteral(QT_TRANSLATE_NOOP("PredefinedColorPaletes", "Mixxx Hotcue Colors")),
                 {
-                        kColorMixxxRed,
-                        kColorMixxxGreen,
-                        kColorMixxxCeleste,
-                        kColorMixxxYellow,
-                        kColorMixxxBlue,
-                        kColorMixxxPurple,
-                        kColorMixxxPink,
-                        kColorMixxxWhite,
+                        kColorMixxxPadA,
+                        kColorMixxxPadB,
+                        kColorMixxxPadC,
+                        kColorMixxxPadD,
+                        kColorMixxxPadE,
+                        kColorMixxxPadF,
+                        kColorMixxxPadG,
+                        kColorMixxxPadH,
                         kSchemaMigrationReplacementColor,
                 },
                 // Exclude kSchemaMigrationReplacementColor from the colors assigned to hotcues.

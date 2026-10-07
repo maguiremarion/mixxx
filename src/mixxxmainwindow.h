@@ -10,6 +10,7 @@
 #include "util/parented_ptr.h"
 
 class ControlObject;
+class ControlProxy;
 class ControlPushButton;
 class VolumeWatcher;
 class DlgDeveloperTools;
@@ -159,6 +160,8 @@ class MixxxMainWindow : public QMainWindow {
     // detects at startup.
     std::unique_ptr<ControlPushButton> m_pRestartApp;
     bool m_restartRequested = false;
+    // [ChannelN],eject proxies: warn when eject is tapped while the deck plays.
+    std::vector<std::unique_ptr<ControlProxy>> m_ejectProxies;
     // [App],quit: quit without asking.
     std::unique_ptr<ControlPushButton> m_pQuitApp;
     bool m_skipExitConfirmation = false;

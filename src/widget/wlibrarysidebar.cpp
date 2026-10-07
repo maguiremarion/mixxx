@@ -1,3 +1,4 @@
+#include "widget/wnotice.h"
 #include "widget/wlibrarysidebar.h"
 
 #include <QHeaderView>
@@ -208,40 +209,20 @@ void WLibrarySidebar::mouseReleaseEvent(QMouseEvent* pEvent) {
     QTreeView::mouseReleaseEvent(pEvent);
 }
 
-void WLibrarySidebar::showNotice(const QString& text) {
-    // A big message over the middle of the window. (A tooltip was far too small to read on the
-    // Pi's touchscreen, and a dialog can end up behind the fullscreen kiosk window; a child
-    // widget of the main window can't.) It goes away by itself, and never blocks taps.
+void WLibrarySidebar::showNotice(const QString& text, const QRect& anchorRect) {
+    // Beside the button that was tapped (to its right, level with it).
     QWidget* pWindow = window();
     if (!pWindow) {
         return;
     }
-    if (!m_pNotice) {
-        m_pNotice = new QLabel(pWindow);
-        m_pNotice->setAlignment(Qt::AlignCenter);
-        m_pNotice->setAttribute(Qt::WA_TransparentForMouseEvents);
-        m_pNotice->setStyleSheet(QStringLiteral(
-                "background-color: #181818; color: #ffffff; border: 2px solid #3478f2;"
-                "padding: 24px 36px; font-size: 28px; font-weight: 500;"));
-        m_pNoticeTimer = new QTimer(m_pNotice);
-        m_pNoticeTimer->setSingleShot(true);
-        connect(m_pNoticeTimer, &QTimer::timeout, m_pNotice, &QWidget::hide);
-    }
-    m_pNotice->setText(text);
-    m_pNotice->setMaximumWidth(pWindow->width() * 3 / 4);
-    m_pNotice->setWordWrap(true);
-    m_pNotice->adjustSize();
-    m_pNotice->move((pWindow->width() - m_pNotice->width()) / 2,
-            (pWindow->height() - m_pNotice->height()) / 2);
-    m_pNotice->show();
-    m_pNotice->raise();
-    m_pNoticeTimer->start(4500);
+    WNotice::show(pWindow,
+            text,
+            viewport()->mapTo(pWindow, anchorRect.topRight()) + QPoint(10, 0));
 }
 
 void WLibrarySidebar::ejectDrive(const QString& drivePath, const QRect& buttonRect) {
-    Q_UNUSED(buttonRect);
-    auto say = [this](const QString& text) {
-        showNotice(text);
+    auto say = [this, buttonRect](const QString& text) {
+        showNotice(text, buttonRect);
     };
 
     // Never pull a drive out from under a loaded track.

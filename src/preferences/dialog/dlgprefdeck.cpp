@@ -14,7 +14,9 @@
 #include "util/duration.h"
 
 namespace {
-constexpr int kDefaultRateRangePercent = 8;
+// 6, not stock's 8: the +/- button on the deck cycles 6, 10, 16, 50 %, so starting at 8 meant
+// 8 was never reachable again.
+constexpr int kDefaultRateRangePercent = 6;
 constexpr double kRateDirectionInverted = -1;
 constexpr bool kDefaultRateDirectionInverted = true;
 constexpr RateControl::RampMode kDefaultRampingMode = RateControl::RampMode::Stepping;
@@ -269,6 +271,11 @@ DlgPrefDeck::DlgPrefDeck(QWidget* parent, UserSettingsPointer pConfig)
                 kDefaultRateRangePercent);
     }
     if (!(m_iRateRangePercent > 0 && m_iRateRangePercent <= 90)) {
+        m_iRateRangePercent = kDefaultRateRangePercent;
+    }
+    if (m_iRateRangePercent == 8) {
+        // 8 is stock Mixxx's default, saved by every earlier run. It is not on the deck button's
+        // cycle (see above), so it becomes 6.
         m_iRateRangePercent = kDefaultRateRangePercent;
     }
     setRateRangeForAllDecks(m_iRateRangePercent);

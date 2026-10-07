@@ -7,7 +7,9 @@
 #include <QSet>
 #include <QPolygonF>
 #include <QStyleOptionHeader>
+#include <QShowEvent>
 #include <QTextOption>
+#include <QTimer>
 #include <QWidgetAction>
 
 #include <QFontMetrics>
@@ -324,6 +326,11 @@ void WTrackTableViewHeader::restoreHeaderState() {
             view_state.restoreState(this);
         }
     }
+    // A model with its own layout (Rekordbox) fills the table: the last column (the overview
+    // waveform) takes whatever width the others leave over, instead of an empty strip.
+    if (!pTrackModel->defaultColumnLayout().isEmpty()) {
+        setStretchLastSection(true);
+    }
 }
 
 void WTrackTableViewHeader::loadDefaultHeaderState() {
@@ -363,6 +370,65 @@ void WTrackTableViewHeader::loadDefaultHeaderState() {
             hideSection(i);
         }
     }
+    m_fitLayout = layout;
+    m_fitPending = true;
+    if (isVisible()) {
+        QTimer::singleShot(0, this, [this]() {
+            if (m_fitPending) {
+                m_fitPending = false;
+                fitDefaultColumnsToTitles(m_fitLayout);
+            }
+        });
+    }
+}
+
+void WTrackTableViewHeader::showEvent(QShowEvent* pEvent) {
+    QHeaderView::showEvent(pEvent);
+    if (m_fitPending) {
+        // After this event the style (skin padding, font) is in place: measure then.
+        QTimer::singleShot(0, this, [this]() {
+            if (m_fitPending) {
+                m_fitPending = false;
+                fitDefaultColumnsToTitles(m_fitLayout);
+            }
+        });
+    }
+}
+
+void WTrackTableViewHeader::fitDefaultColumnsToTitles(const QList<QPair<int, int>>& layout) {
+    // A title that doesn't fit isn't drawn whole (see paintSection()). Every column of a default
+    // layout keeps its fixed width except the one the model calls flexible (Duration): it is
+    // widened just enough for its title, and the pixels come from the widest other column, so
+    // the total stays what the layout asked for.
+    TrackModel* pTrackModel = getTrackModel();
+    const int flexible = pTrackModel ? pTrackModel->defaultFlexibleColumn() : -1;
+    if (flexible < 0 || flexible >= count() || isSectionHidden(flexible)) {
+        return;
+    }
+    QStyleOptionHeader opt;
+    initStyleOption(&opt);
+    opt.rect = QRect(0, 0, 200, std::max(height(), 20));
+    const int padding = 200 - style()->subElementRect(QStyle::SE_HeaderLabel, &opt, this).width();
+    const QFontMetrics fontMetrics(font());
+    const QString title =
+            model()->headerData(flexible, orientation(), Qt::DisplayRole).toString();
+    const int needed = fontMetrics.horizontalAdvance(title) + padding + 2;
+    const int missing = needed - sectionSize(flexible);
+    if (missing <= 0) {
+        return;
+    }
+    int widest = -1;
+    for (const auto& [column, width] : layout) {
+        if (column >= 0 && column < count() && column != flexible &&
+                (widest < 0 || sectionSize(column) > sectionSize(widest))) {
+            widest = column;
+        }
+    }
+    if (widest < 0) {
+        return;
+    }
+    resizeSection(flexible, needed);
+    resizeSection(widest, std::max(WTTVH_MINIMUM_SECTION_SIZE, sectionSize(widest) - missing));
 }
 
 bool WTrackTableViewHeader::hasPersistedHeaderState() {
@@ -578,7 +644,14 @@ void WTrackTableViewHeader::paintSection(
     // arrow gets its room first, because it says which column the list is sorted by.
     const bool textFits = textWidth <= contentRect.width() - indicatorSpace;
 
-    if (textFits) { // Draw text. Use PainterScope, just in case...
+    // Too narrow for the whole title: show it shortened ("Dur...") rather than not at all, as long
+    // as there is room for a few letters.
+    const int available = contentRect.width() - indicatorSpace;
+    const QString shownTitle = textFits ? title
+                                        : (available >= 40 ? fontMetrics.elidedText(
+                                                                     title, Qt::ElideRight, available)
+                                                           : QString());
+    if (!shownTitle.isEmpty()) { // Draw text. Use PainterScope, just in case...
         PainterScope painterScope(pPainter);
 
         // BaseTrackTableModel::headerData(section, orientation, Qt::TextAlignmentRole)
@@ -599,7 +672,7 @@ void WTrackTableViewHeader::paintSection(
         pPainter->setFont(font());
         pPainter->setPen(m_headerTextColor.isValid() ? m_headerTextColor
                                                      : opt.palette.color(QPalette::ButtonText));
-        pPainter->drawText(textRect, title, textOption);
+        pPainter->drawText(textRect, shownTitle, textOption);
     }
 
     // Draw sort indicator if needed

@@ -43,6 +43,7 @@
 #include "util/db/dbconnectionpooler.h"
 #include "util/sandbox.h"
 #include "waveform/waveform.h"
+#include "widget/wtracktableview.h"
 #include "widget/wlibrary.h"
 #include "widget/wlibrarytextbrowser.h"
 
@@ -1666,28 +1667,36 @@ CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
 
 QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
     // The playlist position (#, sorted ascending by default for a playlist), cover art, then the
-    // things you pick a track by, then the overview waveform. The widths add up to 766 px: the
-    // width the table gets on a 1024 px wide screen (sidebar 230, scrollbar 28), minus a safety margin
-    // so it never needs to scroll sideways. Everything else
-    // is hidden (turn it back on from the header's right-click menu). Bump
+    // things you pick a track by, then the overview waveform. The table is 766 px wide on a
+    // 1024 px screen (1024 - sidebar 230 - scrollbar 28); these add up to 764, so the columns fill
+    // it with nothing left over on the right and it never scrolls sideways. The header widens a
+    // column whose title doesn't fit and takes the pixels from the widest one (the title).
+    // Everything else is hidden (turn it back on from the header's right-click menu). Bump
     // defaultColumnLayoutVersion() when changing this so it replaces saved layouts.
     return {
             {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 192},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 200},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 141},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 51},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 80},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 146},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 156},
     };
+}
+
+int RekordboxPlaylistModel::defaultFlexibleColumn() const {
+    // Duration: its title is longer than its values, so it is the one that needs room for text.
+    return fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION);
 }
 
 int RekordboxPlaylistModel::defaultColumnLayoutVersion() const {
     // 2: overview narrowed so the columns fit without sideways scrolling
     // 3: a few px moved from the title to Duration, whose title was cut off
     // 4: Duration trimmed back a little (86 -> 80)
-    return 4;
+    // 5: widths fill the table (764 of 766 px), Duration sized to its title
+    // 6: only Duration is measured against its title; all other widths are fixed
+    return 6;
 }
 
 bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {
@@ -1796,6 +1805,7 @@ RekordboxFeature::~RekordboxFeature() {
 void RekordboxFeature::bindLibraryWidget(WLibrary* pLibraryWidget,
         KeyboardEventFilter* keyboard) {
     Q_UNUSED(keyboard);
+    m_pLibraryWidget = pLibraryWidget;
     parented_ptr<WLibraryTextBrowser> pEdit = make_parented<WLibraryTextBrowser>(pLibraryWidget);
     pEdit->setHtml(formatRootViewHtml());
     pLibraryWidget->registerView("REKORDBOXHOME", pEdit);
@@ -2088,9 +2098,11 @@ void RekordboxFeature::onRekordboxDevicesFound() {
         if (root->childRows() > 0) {
             // Devices have since been unmounted
             m_pSidebarModel->removeRows(0, root->childRows());
+            leaveViewOfRemovedDevices();
         }
     } else {
-        for (int deviceIndex = 0; deviceIndex < root->childRows(); deviceIndex++) {
+        bool removedAny = false;
+        for (int deviceIndex = root->childRows() - 1; deviceIndex >= 0; deviceIndex--) {
             TreeItem* child = root->child(deviceIndex);
             bool removeChild = true;
 
@@ -2106,7 +2118,11 @@ void RekordboxFeature::onRekordboxDevicesFound() {
                 clearDeviceTables(database, child);
 
                 m_pSidebarModel->removeRows(deviceIndex, 1);
+                removedAny = true;
             }
+        }
+        if (removedAny) {
+            leaveViewOfRemovedDevices();
         }
 
         std::vector<std::unique_ptr<TreeItem>> childrenToAdd;
@@ -2149,6 +2165,25 @@ void RekordboxFeature::onRekordboxDevicesFound() {
     // calls a slot in the sidebarmodel such that 'isLoading' is removed from the feature title.
     m_title = tr("Rekordbox");
     emit featureLoadingFinished(this);
+}
+
+void RekordboxFeature::leaveViewOfRemovedDevices() {
+    // A drive went away (ejected, or pulled out). Its entries are gone from the sidebar and the
+    // database, but if its track list is what is on screen, that list just stayed there until you
+    // left the Rekordbox view and came back, and loading one of its tracks said "file not found".
+    // The Library doesn't tell a feature when its view is replaced, so look at what is showing.
+    if (!m_pLibraryWidget) {
+        return;
+    }
+    const WTrackTableView* pTable = m_pLibraryWidget->getCurrentTrackTableView();
+    const bool showingRekordbox = pTable &&
+            pTable->model() == static_cast<const QAbstractItemModel*>(m_pRekordboxPlaylistModel.get());
+    const bool showingLoadingPage =
+            m_pLoadingView && m_pLibraryWidget->getActiveView() == m_pLoadingView.data();
+    if (showingRekordbox || showingLoadingPage) {
+        m_loadingTimer.stop();
+        emit switchToView("REKORDBOXHOME");
+    }
 }
 
 void RekordboxFeature::onTracksFound() {

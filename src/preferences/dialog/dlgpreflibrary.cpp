@@ -766,7 +766,7 @@ void DlgPrefLibrary::slotBpmRangeSelected(int index) {
     const int bpmRange = comboBox_search_bpm_fuzzy_range->itemData(index).toInt();
     m_pConfig->set(kSearchBpmFuzzyRangeConfigKey, ConfigValue{bpmRange});
     const int rateRangePercent =
-            m_pConfig->getValue(ConfigKey("[Controls]", "RateRangePercent"), 8);
+            m_pConfig->getValue(ConfigKey("[Controls]", "RateRangePercent"), 6);
     BpmFilterNode::setBpmRelativeRange(bpmRange * rateRangePercent / 10000.0);
 }
 

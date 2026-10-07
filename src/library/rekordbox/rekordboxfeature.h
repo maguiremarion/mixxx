@@ -61,6 +61,7 @@ class RekordboxPlaylistModel : public BaseExternalPlaylistModel {
     /// What a fresh install shows in the Rekordbox view (sized for a 1024x600 screen).
     QList<QPair<int, int>> defaultColumnLayout() const override;
     int defaultColumnLayoutVersion() const override;
+    int defaultFlexibleColumn() const override;
     /// Rekordbox tracks aren't in Mixxx's library, so there is no stored cover art for
     /// them. It is worked out from the file (embedded art, or an image in its folder) on a
     /// background thread the first time a row is drawn: until it is ready this returns no
@@ -132,6 +133,7 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
     TreeItem* findDeviceItem(const QString& devicePath) const;
     void showLoadingPage(const QString& heading, const QString& message, bool animate);
     void openPlaylistDeferred(const QString& label, const QString& playlist);
+    void leaveViewOfRemovedDevices();
     void updateLoadingPage();
     std::unique_ptr<BaseSqlTableModel> createPlaylistModelForPlaylist(
             const QVariant& data) override;
@@ -151,6 +153,7 @@ class RekordboxFeature : public BaseExternalLibraryFeature {
     QString m_showWhenParsed;      // show this device's tracks when it finishes (it was tapped)
     QPointer<WLibraryTextBrowser> m_pLoadingView;
     quint64 m_openToken = 0;
+    QPointer<WLibrary> m_pLibraryWidget;
     QTimer m_loadingTimer;
     QString m_loadingHeading;
     QString m_loadingMessage;

@@ -1053,12 +1053,9 @@ void CueControl::hotcueSet(HotcueControl* pControl, double value, HotcueSetMode 
             color = colorFromConfig(ConfigKey("[Controls]", "jump_default_color_index"));
         }
     } else {
-        ConfigKey autoHotcueColorsKey("[Controls]", "auto_hotcue_colors");
-        if (getConfig()->getValue(autoHotcueColorsKey, false)) {
-            color = m_colorPaletteSettings.getHotcueColorPalette().colorForHotcueIndex(hotcueIndex);
-        } else {
-            color = colorFromConfig(ConfigKey("[Controls]", "HotcueDefaultColorIndex"));
-        }
+        // Each pad gets its own colour from the hot cue palette (A red, B blue, ...). Stock Mixxx
+        // does that only when "auto_hotcue_colors" is on, which every saved config has as off.
+        color = m_colorPaletteSettings.getHotcueColorPalette().colorForHotcueIndex(hotcueIndex);
     }
 
     m_pLoadedTrack->createAndAddCue(

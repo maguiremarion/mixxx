@@ -14,6 +14,7 @@
 #include <QPointer>
 #include <QPushButton>
 #include <QScreen>
+#include <QTimer>
 
 #include "engine/controls/cuecontrol.h"
 #include "mixer/playerinfo.h"
@@ -90,6 +91,9 @@ void WHotcueButton::setup(const QDomNode& node, const SkinContext& context) {
     }
 
     m_hoverCueColor = context.selectBool(node, QStringLiteral("Hover"), false);
+    // <TouchOnly>true</TouchOnly>: an invisible button laid over a whole cell, so a tap or hold
+    // anywhere in the cell counts. It must not paint the cue colour (the visible square does).
+    m_touchOnly = context.selectBool(node, QStringLiteral("TouchOnly"), false);
 
     // For dnd/swapping hotcues we use the rendered widget pixmap as dnd cursor.
     // Unfortnately the margin that constraints the bg color is not considered,
@@ -244,6 +248,8 @@ void WHotcueButton::mousePressEvent(QMouseEvent* pEvent) {
         // sets a cue, which must not immediately arm the delete popup).
         const bool wasSet = readDisplayValue() != 0;
         m_pendingPress = false;
+        m_holdHandled = false;
+        closeDeletePopup();
         if (wasSet && pEvent->button() == Qt::LeftButton) {
             // A set pad can be tapped (jump to the cue) or held (delete popup). Don't tell the
             // deck anything yet, or a hold would always jump first: a tap is sent when the
@@ -261,18 +267,32 @@ void WHotcueButton::mousePressEvent(QMouseEvent* pEvent) {
 
 void WHotcueButton::showDeletePopup() {
     TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
-    if (!findHotCue(pTrack, m_hotcue)) {
+    QWidget* pWindow = window();
+    if (!findHotCue(pTrack, m_hotcue) || !pWindow) {
         return;
     }
 
     // It was a hold, not a tap: the press was never sent, so there is nothing to let go of (and
-    // the pad must not jump). The popup grabs the mouse, so the finger's release goes to it.
+    // the pad must not jump). The finger's release is swallowed (mouseReleaseEvent()).
     m_pendingPress = false;
+    m_holdHandled = true;
+    closeDeletePopup();
 
-    auto* pPopup = new QFrame(this, Qt::Popup);
+    // A child widget of the main window, not a Qt::Popup window: a popup relies on the window
+    // system's mouse grab, and on the Pi (XWayland + touch emulation) taps on it never arrived,
+    // so "Delete" did nothing.
+    m_pDeletePopup = new QFrame(pWindow);
+    QFrame* pPopup = m_pDeletePopup;
     pPopup->setObjectName(QStringLiteral("CueDeletePopup"));
-    pPopup->setAttribute(Qt::WA_DeleteOnClose);
     pPopup->setAttribute(Qt::WA_StyledBackground);
+    // Sized for a finger, like the other on-screen messages (the keyboard, the eject notice).
+    // Inline, so it doesn't depend on skin rules matching a widget that isn't in the skin.
+    pPopup->setStyleSheet(QStringLiteral(
+            "QFrame#CueDeletePopup { background-color: #181818; border: 1px solid #3478f2; }"
+            "QPushButton#CueDeleteButton { color: #ffffff; background-color: #262626;"
+            "  font-size: 19px; font-weight: 600; border: none; border-radius: 0;"
+            "  padding: 8px 16px; margin: 4px; }"
+            "QPushButton#CueDeleteButton:pressed { background-color: #d63a3a; }"));
     auto* pLayout = new QHBoxLayout(pPopup);
     pLayout->setContentsMargins(0, 0, 0, 0);
     pLayout->setSpacing(0);
@@ -282,24 +302,55 @@ void WHotcueButton::showDeletePopup() {
     pDelete->setObjectName(QStringLiteral("CueDeleteButton"));
     pDelete->setFocusPolicy(Qt::NoFocus);
     pLayout->addWidget(pDelete);
-    connect(pDelete, &QPushButton::clicked, this, [this, pPopup]() {
-        pPopup->close();
+    connect(pDelete, &QPushButton::clicked, this, [this]() {
+        closeDeletePopup();
         TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
         if (CuePointer pCue = findHotCue(pTrack, m_hotcue)) {
             pTrack->removeCue(pCue);
         }
     });
 
-    // Open just above the pad (the grid sits low on the screen), kept on-screen.
+    // Centred on the pad's cell, so it appears right where the finger is held. (Not above the
+    // cell: that is the waveform area, and the waveforms are native windows, drawn over every
+    // ordinary widget, so a popup there is cut off.) Kept inside the window.
     pPopup->adjustSize();
-    QPoint pos = mapToGlobal(QPoint(0, -pPopup->height()));
-    if (const QScreen* pScreen = screen()) {
-        const QRect avail = pScreen->availableGeometry();
-        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
-        pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
-    }
+    const QPoint cellTopLeft = mapTo(pWindow, QPoint(0, 0));
+    QPoint pos(cellTopLeft.x() + (width() - pPopup->width()) / 2,
+            cellTopLeft.y()); // top level with the cell and growing downwards, away from the waveforms
+    pos.setX(qBound(0, pos.x(), std::max(0, pWindow->width() - pPopup->width())));
+    pos.setY(qBound(0, pos.y(), std::max(0, pWindow->height() - pPopup->height())));
     pPopup->move(pos);
     pPopup->show();
+    pPopup->raise();
+
+    // Any tap elsewhere dismisses it (the tap still goes through), and it goes by itself.
+    qApp->installEventFilter(this);
+    QTimer::singleShot(6000, pPopup, [this, pPopup]() {
+        if (m_pDeletePopup == pPopup) {
+            closeDeletePopup();
+        }
+    });
+}
+
+void WHotcueButton::closeDeletePopup() {
+    if (m_pDeletePopup) {
+        qApp->removeEventFilter(this);
+        m_pDeletePopup->hide();
+        m_pDeletePopup->deleteLater();
+        m_pDeletePopup = nullptr;
+    }
+}
+
+bool WHotcueButton::eventFilter(QObject* pObj, QEvent* pEvent) {
+    if (m_pDeletePopup &&
+            (pEvent->type() == QEvent::MouseButtonPress ||
+                    pEvent->type() == QEvent::TouchBegin)) {
+        auto* pWidget = qobject_cast<QWidget*>(pObj);
+        if (pWidget && !m_pDeletePopup->isAncestorOf(pWidget) && pWidget != m_pDeletePopup) {
+            closeDeletePopup();
+        }
+    }
+    return WPushButton::eventFilter(pObj, pEvent);
 }
 
 void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
@@ -309,6 +360,10 @@ void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
         return;
     }
     m_longPressTimer.stop();
+    if (m_holdHandled) {
+        m_holdHandled = false; // the finger lifting after a hold: nothing to send
+        return;
+    }
     if (m_pendingPress) {
         // A tap on a set pad: send the press now, then the release.
         m_pendingPress = false;
@@ -416,6 +471,10 @@ ConfigKey WHotcueButton::createConfigKey(const QString& name) {
 
 void WHotcueButton::slotColorChanged(double color) {
     VERIFY_OR_DEBUG_ASSERT(color >= 0 && color <= 0xFFFFFF) {
+        return;
+    }
+    if (m_touchOnly) {
+        setStyleSheet(QStringLiteral("WWidget { background-color: transparent; border: none; }"));
         return;
     }
     QColor cueColor = QColor::fromRgb(static_cast<QRgb>(color));
