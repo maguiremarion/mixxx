@@ -1,6 +1,7 @@
 #include "waveform/renderers/allshader/waveformrenderbeat.h"
 
 #include <QDomNode>
+#include <algorithm>
 
 #include "engine/engine.h"
 #include "moc_waveformrenderbeat.cpp"
@@ -132,21 +133,26 @@ bool WaveformRenderBeat::preprocessInner() {
         numBeatsInRange++;
     }
 
+    // Beats are short ticks at the top and bottom edge, not lines through the whole waveform
+    // (the slip renderer keeps one tick, at the top).
     const int numBoxesPerBeat = (m_isSlipRenderer && splitStemTracks)
             ? mixxx::kMaxSupportedStems
-            : 1;
+            : (m_isSlipRenderer ? 1 : 2);
     const int reserved = numBeatsInRange * numVerticesPerLine * numBoxesPerBeat;
     geometry().allocate(reserved);
 
     VertexUpdater vertexUpdater{geometry().vertexDataAs<Geometry::Point2D>()};
 
-    m_pDownbeatNode->geometry().allocate(numDownbeatsInRange * numVerticesPerLine);
+    m_pDownbeatNode->geometry().allocate(numDownbeatsInRange * numVerticesPerLine * 2);
     VertexUpdater downbeatUpdater{
             m_pDownbeatNode->geometry().vertexDataAs<Geometry::Point2D>()};
 
     const float boxBreadth = splitStemTracks
             ? rendererBreadth / static_cast<float>(mixxx::kMaxSupportedStems)
             : rendererBreadth;
+
+    const float tickLength = std::min(rendererBreadth / 4.f, 14.f);
+    const float downbeatTickLength = std::min(rendererBreadth / 3.f, 22.f);
 
     int beatIndex = firstShownIndex;
     for (auto it = trackBeats->iteratorFrom(startPosition);
@@ -160,7 +166,7 @@ bool WaveformRenderBeat::preprocessInner() {
         xBeatPoint = qRound(xBeatPoint * devicePixelRatio) / devicePixelRatio;
 
         const float x1 = static_cast<float>(xBeatPoint);
-        const float x2 = x1 + 1.f;
+        const float x2 = x1 + 2.f;
 
         if (m_isSlipRenderer && splitStemTracks) {
             for (int stemIdx = 0; stemIdx < mixxx::kMaxSupportedStems; ++stemIdx) {
@@ -169,11 +175,15 @@ bool WaveformRenderBeat::preprocessInner() {
                 vertexUpdater.addRectangle({x1, posy1}, {x2, posy2});
             }
         } else {
-            vertexUpdater.addRectangle({x1, 0.f},
-                    {x2, m_isSlipRenderer ? rendererBreadth / 2 : rendererBreadth});
+            vertexUpdater.addRectangle({x1, 0.f}, {x2, tickLength});
+            if (!m_isSlipRenderer) {
+                vertexUpdater.addRectangle({x1, rendererBreadth - tickLength}, {x2, rendererBreadth});
+            }
             if (drawDownbeats && isDownbeat(beatIndex)) {
-                // twice as wide as the ordinary line
-                downbeatUpdater.addRectangle({x1 - 0.5f, 0.f}, {x1 + 1.5f, rendererBreadth});
+                // the first beat of a bar: a longer tick, in red, as wide as the others
+                downbeatUpdater.addRectangle({x1, 0.f}, {x2, downbeatTickLength});
+                downbeatUpdater.addRectangle({x1, rendererBreadth - downbeatTickLength},
+                        {x2, rendererBreadth});
             }
         }
     }

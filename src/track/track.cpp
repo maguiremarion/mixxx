@@ -582,6 +582,24 @@ QString Track::getInfo() const {
     }
 }
 
+QString Track::getTitleArtistInfo() const {
+    const auto locked = lockMutex(&m_qMutex);
+    const QString title = m_record.getMetadata().getTrackInfo().getTitle();
+    const QString artist = m_record.getMetadata().getTrackInfo().getArtist();
+    const bool hasTitle = !title.trimmed().isEmpty();
+    const bool hasArtist = !artist.trimmed().isEmpty();
+    if (hasTitle && hasArtist) {
+        return title + QStringLiteral(" - ") + artist;
+    }
+    if (hasTitle) {
+        return title;
+    }
+    if (hasArtist) {
+        return artist;
+    }
+    return m_fileAccess.info().fileName();
+}
+
 QString Track::getTitleInfo() const {
     const auto locked = lockMutex(&m_qMutex);
     if (m_record.getMetadata().getTrackInfo().getArtist().trimmed().isEmpty() &&

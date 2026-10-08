@@ -98,23 +98,32 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
 
         xBeatPoint = qRound(xBeatPoint * devicePixelRatio) / devicePixelRatio;
 
-        // If we don't have enough space, double the size.
-        if (beatCount >= m_beats.size()) {
-            m_beats.resize(m_beats.size() * 2);
+        // Two ticks per beat (one at each edge), so make sure there is room for both.
+        if (beatCount + 2 > m_beats.size()) {
+            m_beats.resize(std::max<qsizetype>(32, m_beats.size() * 2));
         }
 
-        if (orientation == Qt::Horizontal) {
-            m_beats[beatCount++].setLine(xBeatPoint, 0.0f, xBeatPoint, rendererHeight);
-        } else {
-            m_beats[beatCount++].setLine(0.0f, xBeatPoint, rendererWidth, xBeatPoint);
-        }
-
-        // The first beat of each bar: remember its line, drawn on top in red below.
-        if (((beatIndex - downbeatPhase) % 4 + 4) % 4 == 0) {
-            if (downbeatCount >= m_downbeats.size()) {
-                m_downbeats.resize(std::max<qsizetype>(16, m_downbeats.size() * 2));
+        // Beats are short ticks at the edges, not lines through the whole waveform.
+        const float breadth = orientation == Qt::Horizontal ? rendererHeight : rendererWidth;
+        const float tickLength = std::min(breadth / 4.f, 14.f);
+        const float downbeatTickLength = std::min(breadth / 3.f, 22.f);
+        const auto addTicks = [&](QLineF* pLines, int& count, float length) {
+            if (orientation == Qt::Horizontal) {
+                pLines[count++].setLine(xBeatPoint, 0.0f, xBeatPoint, length);
+                pLines[count++].setLine(xBeatPoint, rendererHeight - length, xBeatPoint, rendererHeight);
+            } else {
+                pLines[count++].setLine(0.0f, xBeatPoint, length, xBeatPoint);
+                pLines[count++].setLine(rendererWidth - length, xBeatPoint, rendererWidth, xBeatPoint);
             }
-            m_downbeats[downbeatCount++] = m_beats[beatCount - 1];
+        };
+        addTicks(m_beats.data(), beatCount, tickLength);
+
+        // The first beat of each bar: longer ticks, drawn on top in red below.
+        if (((beatIndex - downbeatPhase) % 4 + 4) % 4 == 0) {
+            if (downbeatCount + 2 > m_downbeats.size()) {
+                m_downbeats.resize(std::max<qsizetype>(32, m_downbeats.size() * 2));
+            }
+            addTicks(m_downbeats.data(), downbeatCount, downbeatTickLength);
         }
     }
 
@@ -123,7 +132,7 @@ void WaveformRenderBeat::draw(QPainter* painter, QPaintEvent* /*event*/) {
 
     if (downbeatCount > 0) {
         QPen downbeatPen(QColor(0xff, 0x3b, 0x3b));
-        downbeatPen.setWidthF(std::max(1.0, scaleFactor()) * 2.0);
+        downbeatPen.setWidthF(std::max(1.0, scaleFactor())); // same width as the other ticks
         painter->setPen(downbeatPen);
         painter->drawLines(m_downbeats.constData(), downbeatCount);
     }

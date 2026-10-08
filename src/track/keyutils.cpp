@@ -50,7 +50,7 @@ const QString s_traditionalKeyNames[] = {
         QStringLiteral(u"E♭"),
         QStringLiteral(u"E"),
         QStringLiteral(u"F"),
-        QStringLiteral(u"F♯/G♭"),
+        QStringLiteral(u"F♯"), // stock Mixxx shows both spellings, "F♯/G♭": too wide for the key column
         QStringLiteral(u"G"),
         QStringLiteral(u"A♭"),
         QStringLiteral(u"A"),
@@ -59,7 +59,7 @@ const QString s_traditionalKeyNames[] = {
         QStringLiteral(u"Cm"),
         QStringLiteral(u"C♯m"),
         QStringLiteral(u"Dm"),
-        QStringLiteral(u"D♯m/E♭m"),
+        QStringLiteral(u"E♭m"), // stock: "D♯m/E♭m" (2A on the Camelot wheel)
         QStringLiteral(u"Em"),
         QStringLiteral(u"Fm"),
         QStringLiteral(u"F♯m"),

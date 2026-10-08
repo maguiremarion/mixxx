@@ -514,20 +514,19 @@ std::vector<std::unique_ptr<TreeItem>> BrowseFeature::getChildDirectoryItems(
 }
 
 QString BrowseFeature::getRootViewHtml() const {
-    const QString browseTitle = tr("Computer");
-    const QString browseSummary = tr(
-            "\"Computer\" lets you navigate, view, and load tracks"
-            " from folders on your hard disk and external devices.");
-    const QString browseDetails = tr(
-                                          "It shows the data from the file tags, not track data"
-                                          " from your Mixxx library like other track views.") +
-            "<br><br>" +
-            tr("If you load a track file from here, it will be added to your library.");
+    // Same shape as the Rekordbox / Serato start pages: short and big for a small touchscreen,
+    // and saying what this view is for: music that is not in a Rekordbox or Serato library.
+    const QString title = tr("Computer");
+    const QString summary = tr(
+            "Browse items on this device and connected drives to find tracks that aren't stored in a Rekordbox or Serato library format.");
+    const QString detail = tr(
+            "Local files, downloads, and drives that weren't exported from DJ software can be found here. Track loaded"
+            "from here are saved to your device's library.");
 
     QString html;
-    html.append(QString("<h2>%1</h2>").arg(browseTitle));
-    html.append(QString("<p>%1</p>").arg(browseSummary));
-    html.append(QString("<p>%1</p>").arg(browseDetails));
+    html.append(QString("<h1>%1</h1>").arg(title));
+    html.append(QString("<p style=\"font-size:20px;\">%1</p>").arg(summary));
+    html.append(QString("<p style=\"font-size:17px; color:#8c8c94;\">%1</p>").arg(detail));
     return html;
 }
 

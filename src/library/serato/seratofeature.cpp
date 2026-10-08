@@ -973,28 +973,18 @@ TreeItemModel* SeratoFeature::sidebarModel() const {
 }
 
 QString SeratoFeature::formatRootViewHtml() const {
-    QString title = tr("Serato");
-    QString summary = tr("Reads the following from the Serato Music directory and removable devices:");
-    QStringList items;
-
-    items << tr("Tracks")
-          << tr("Crates");
+    // Same shape as the Rekordbox start page: short and big for a small touchscreen. No "look
+    // again" link: tapping Serato in the sidebar already looks for databases again.
+    const QString title = tr("Serato Libraries");
+    const QString summary = tr(
+            "Drives exported from Serato will show up in the 'Serato' dropdown on the left.");
+    const QString detail = tr(
+            "This will load all crates, tracks, cues, and beatgrids from the drive. Applicable drives are picked up automatically when plugged in and read in the background.");
 
     QString html;
-    QString refreshLink = tr("Check for Serato databases (refresh)");
-    html.append(QString("<h2>%1</h2>").arg(title));
-    html.append(QString("<p>%1</p>").arg(summary));
-    html.append(QString("<ul>"));
-    for (const auto& item : std::as_const(items)) {
-        html.append(QString("<li>%1</li>").arg(item));
-    }
-    html.append(QString("</ul>"));
-
-    //Colorize links in lighter blue, instead of QT default dark blue.
-    //Links are still different from regular text, but readable on dark/light backgrounds.
-    //https://github.com/mixxxdj/mixxx/issues/9103
-    html.append(QString("<a style=\"color:#0496FF;\" href=\"refresh\">%1</a>")
-                        .arg(refreshLink));
+    html.append(QString("<h1>%1</h1>").arg(title));
+    html.append(QString("<p style=\"font-size:20px;\">%1</p>").arg(summary));
+    html.append(QString("<p style=\"font-size:17px; color:#8c8c94;\">%1</p>").arg(detail));
     return html;
 }
 

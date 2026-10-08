@@ -83,6 +83,9 @@ class Track : public QObject {
                     STORED false NOTIFY durationChanged)
     Q_PROPERTY(QString info READ getInfo STORED false NOTIFY infoChanged)
     Q_PROPERTY(QString titleInfo READ getTitleInfo STORED false NOTIFY infoChanged)
+    // "Title - Artist" as one string, so a skin can show it in one label that is cut off only at
+    // its end (separate title and artist labels each shrank).
+    Q_PROPERTY(QString titleArtistInfo READ getTitleArtistInfo STORED false NOTIFY infoChanged)
     Q_PROPERTY(QDateTime sourceSynchronizedAt READ getSourceSynchronizedAt STORED false)
 
     mixxx::FileInfo getFileInfo() const {
@@ -300,6 +303,7 @@ class Track : public QObject {
     /// Formatted string with artist and title, separated by
     /// kArtistTitleSeparator.
     QString getInfo() const;
+    QString getTitleArtistInfo() const;
 
     /// The filename if BOTH artist AND title are empty, e.g. for tracks without
     /// any metadata in file tags. Otherwise just the title (even if it is empty).

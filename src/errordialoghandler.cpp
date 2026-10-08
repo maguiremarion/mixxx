@@ -25,7 +25,7 @@ constexpr int kMinimumDialogMargin = 40; // px
 } // namespace
 
 ErrorDialogProperties::ErrorDialogProperties()
-        : m_title(VersionStore::applicationName()),
+        : m_title(QObject::tr("Notice")),
           m_detailsUseMonospaceFont(false),
           m_modal(true),
           m_shouldQuit(false),

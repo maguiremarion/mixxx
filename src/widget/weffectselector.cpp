@@ -1,7 +1,10 @@
 #include "widget/weffectselector.h"
 
 #include <QAbstractItemView>
+#include <QStyleOptionComboBox>
+#include <QStylePainter>
 #include <QtDebug>
+#include <algorithm>
 
 #include "effects/effectsmanager.h"
 #include "effects/visibleeffectslist.h"
@@ -65,18 +68,15 @@ void WEffectSelector::populate() {
     clear(); // Should hide popup
 
     const QList<EffectManifestPointer> visibleEffectManifests = m_pVisibleEffectsList->getList();
-    QFontMetrics metrics(font());
-
     // Add empty item: no effect
     addItem(kNoEffectString);
     setItemData(0, QVariant(tr("No effect loaded.")), Qt::ToolTipRole);
 
     for (int i = 0; i < visibleEffectManifests.size(); ++i) {
         const EffectManifestPointer pManifest = visibleEffectManifests.at(i);
-        QString elidedDisplayName = metrics.elidedText(pManifest->displayName(),
-                Qt::ElideMiddle,
-                view()->width() - 2);
-        addItem(elidedDisplayName, QVariant(pManifest->uniqueId()));
+        // Full names in the list (the popup widens to fit them, see showPopup()); the closed box
+        // shrinks the text to fit instead (see paintEvent()).
+        addItem(pManifest->displayName(), QVariant(pManifest->uniqueId()));
 
         QString name = pManifest->name();
         QString description = pManifest->description();
@@ -146,6 +146,13 @@ void WEffectSelector::slotPresetListShowRequest(bool show) {
 /// both when clicking the down arrow and when triggering the control.
 void WEffectSelector::showPopup() {
     if (count() > 0) {
+        // The list is as wide as the box by default, which cut long effect names off.
+        const QFontMetrics metrics(view()->font());
+        int widest = width();
+        for (int i = 0; i < count(); ++i) {
+            widest = std::max(widest, metrics.horizontalAdvance(itemText(i)) + 48);
+        }
+        view()->setMinimumWidth(widest);
         QComboBox::showPopup();
         emit presetListVisibleChanged(true);
     }
@@ -158,6 +165,37 @@ void WEffectSelector::hidePopup() {
     emit presetListVisibleChanged(false);
 }
 
+void WEffectSelector::paintEvent(QPaintEvent* pEvent) {
+    Q_UNUSED(pEvent);
+    // The frame and arrow as the skin styles them, then the effect name drawn here: shrunk until
+    // it fits the box (down to a minimum), only shortened if even that is too long. Cutting
+    // names off with "..." looked bad, and the list below shows them in full anyway.
+    QStyleOptionComboBox option;
+    initStyleOption(&option);
+    const QString text = option.currentText;
+    option.currentText.clear();
+    option.currentIcon = QIcon();
+
+    QStylePainter painter(this);
+    painter.drawComplexControl(QStyle::CC_ComboBox, option);
+
+    // The whole box, a few pixels in from each edge, with the text centred in it: the style's
+    // "edit field" leaves room on the right for a drop-down arrow, which is hidden in this skin.
+    const QRect textRect = rect().adjusted(6, 0, -6, 0);
+    QFont textFont = font();
+    int pixelSize = textFont.pixelSize() > 0 ? textFont.pixelSize() : QFontInfo(textFont).pixelSize();
+    constexpr int kMinPixelSize = 10;
+    while (pixelSize > kMinPixelSize &&
+            QFontMetrics(textFont).horizontalAdvance(text) > textRect.width()) {
+        textFont.setPixelSize(--pixelSize);
+    }
+    painter.setFont(textFont);
+    painter.setPen(m_textColor.isValid() ? m_textColor : palette().color(QPalette::ButtonText));
+    painter.drawText(textRect,
+            Qt::AlignVCenter | Qt::AlignHCenter,
+            QFontMetrics(textFont).elidedText(text, Qt::ElideRight, textRect.width()));
+}
+
 bool WEffectSelector::event(QEvent* pEvent) {
     if (pEvent->type() == QEvent::ToolTip) {
         updateTooltip();
@@ -168,3 +206,4 @@ bool WEffectSelector::event(QEvent* pEvent) {
 
     return QComboBox::event(pEvent);
 }
+

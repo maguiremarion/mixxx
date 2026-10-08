@@ -37,6 +37,7 @@
 #include "track/beats.h"
 #include "track/cue.h"
 #include "track/keyfactory.h"
+#include "track/keyutils.h"
 #include "track/track.h"
 #include "util/color/color.h"
 #include "util/db/dbconnectionpooled.h"
@@ -126,6 +127,9 @@ bool createLibraryTable(QSqlDatabase& database, const QString& tableName) {
             "    bitrate TEXT,"
             "    bpm FLOAT,"
             "    key TEXT,"
+            // The numeric key (Mixxx's ChromaticKey) that sorting by the Key column orders by.
+            // Without it that sort made the whole query fail and every list came up empty.
+            "    key_id INTEGER DEFAULT 0,"
             "    rating INTEGER,"
             "    analyze_path TEXT UNIQUE,"
             "    device TEXT,"
@@ -424,6 +428,7 @@ void insertTrack(
     query.bindValue(":comment", comment);
     query.bindValue(":tracknumber", tracknumber);
     query.bindValue(":key", key);
+    query.bindValue(":key_id", static_cast<int>(KeyUtils::guessKeyFromText(key)));
     query.bindValue(":bpm", bpm);
     query.bindValue(":bitrate", bitrate);
     query.bindValue(":analyze_path", anlzPath);
@@ -517,10 +522,10 @@ QString parseDeviceDBImpl(mixxx::DbConnectionPoolPtr dbConnectionPool,
     query.prepare("INSERT INTO " + kRekordboxLibraryTable +
             " (rb_id, artist, title, album, year,"
             "genre,comment,tracknumber,bpm, bitrate,duration, location,"
-            "rating,key,analyze_path,device,color) VALUES (:rb_id, :artist, "
+            "rating,key,key_id,analyze_path,device,color) VALUES (:rb_id, :artist, "
             ":title, :album, :year,:genre,"
             ":comment, :tracknumber,:bpm, :bitrate,:duration, :location,"
-            ":rating,:key,:analyze_path,:device,:color)");
+            ":rating,:key,:key_id,:analyze_path,:device,:color)");
 
     int audioFilesCount = 0;
 
@@ -1951,7 +1956,7 @@ QString RekordboxFeature::formatRootViewHtml() const {
     const QString summary = tr(
             "Drives exported from Rekordbox will show up in the 'Rekordbox' dropdown on the left.");
     const QString detail = tr(
-            "This will load all tracks, playlists, beatgrids, and cues from the drive. A drive is picked up automatically when it is plugged in and read in the background.");
+            "This will load all tracks, playlists, beatgrids, and cues from the drive. Applicable drives are picked up automatically when plugged in and read in the background.");
 
     QString html;
     html.append(QString("<h1>%1</h1>").arg(title));
