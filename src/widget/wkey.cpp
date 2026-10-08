@@ -50,7 +50,15 @@ WKey::WKey(const QString& group, UserSettingsPointer pConfig, QWidget* pParent)
           m_colorPaletteSettings(pConfig) {
     setValue();
     m_keyNotation.connectValueChanged(this, &WKey::keyNotationChanged);
-    m_showCamelot.connectValueChanged(this, [this](double) { setValue(); });
+    m_showCamelot.connectValueChanged(this, [this, pConfig](double value) {
+        // Remember the choice for the next start. A persistent control saves itself when it is
+        // destroyed, and this one never is (see ensureShowCamelotControl()), so write it here.
+        // The control reads it back when it is created.
+        if (pConfig) {
+            pConfig->setValue(kShowCamelotKey, value > 0.0);
+        }
+        setValue();
+    });
     m_engineKeyDistance.connectValueChanged(this, &WKey::setCents);
 }
 

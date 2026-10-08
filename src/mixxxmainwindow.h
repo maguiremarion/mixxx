@@ -167,6 +167,7 @@ class MixxxMainWindow : public QMainWindow {
     bool m_skipExitConfirmation = false;
     void quitWithoutPrompt();
     void applyDialogStyleSheet();
+    void startReplacementProcess();
     // [App],rescan_library / [App],library_scan_active: Library > Rescan Library
     // (Ctrl+Shift+L) as controls for skins and controllers.
     std::unique_ptr<ControlPushButton> m_pRescanLibrary;

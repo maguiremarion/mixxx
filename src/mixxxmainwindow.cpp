@@ -377,26 +377,9 @@ void MixxxMainWindow::initialize() {
                 }
             });
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
-        if (!m_restartRequested) {
-            return;
+        if (m_restartRequested) {
+            startReplacementProcess();
         }
-        QStringList args = QCoreApplication::arguments().mid(1);
-#ifdef Q_OS_WIN
-        QProcess::startDetached(QCoreApplication::applicationFilePath(), args);
-#else
-        // A helper shell waits until this process has exited (it holds Mixxx's single
-        // instance lock until then), then replaces itself with the new Mixxx.
-        QStringList shellArgs{
-                QStringLiteral("-c"),
-                QStringLiteral("pid=$1; shift; "
-                               "while kill -0 \"$pid\" 2>/dev/null; do sleep 0.3; done; "
-                               "exec \"$@\""),
-                QStringLiteral("sh"),
-                QString::number(QCoreApplication::applicationPid()),
-                QCoreApplication::applicationFilePath()};
-        shellArgs += args;
-        QProcess::startDetached(QStringLiteral("/bin/sh"), shellArgs);
-#endif
     });
 
     // Tapping a deck's eject button while it plays does nothing (Mixxx ignores eject then, and
@@ -903,32 +886,40 @@ QDialog::DialogCode MixxxMainWindow::soundDeviceErrorMsgDlg(
     return soundDeviceErrorDlg(title, text, retryClicked);
 }
 
+/// Starts a new copy of this program with the same arguments, which waits until this process has
+/// exited (it holds the single-instance lock until then) before it takes over.
+void MixxxMainWindow::startReplacementProcess() {
+    QStringList args = QCoreApplication::arguments().mid(1);
+#ifdef Q_OS_WIN
+    QProcess::startDetached(QCoreApplication::applicationFilePath(), args);
+#else
+    QStringList shellArgs{
+            QStringLiteral("-c"),
+            QStringLiteral("pid=$1; shift; "
+                           "while kill -0 \"$pid\" 2>/dev/null; do sleep 0.3; done; "
+                           "exec \"$@\""),
+            QStringLiteral("sh"),
+            QString::number(QCoreApplication::applicationPid()),
+            QCoreApplication::applicationFilePath()};
+    shellArgs += args;
+    QProcess::startDetached(QStringLiteral("/bin/sh"), shellArgs);
+#endif
+}
+
 QDialog::DialogCode MixxxMainWindow::noOutputDlg(bool* continueClicked) {
     QMessageBox msgBox;
     msgBox.setIcon(QMessageBox::Warning);
-    msgBox.setWindowTitle(tr("No Output Devices"));
-    msgBox.setText(
-            "<html>" + tr("No audio output is configured. "
-            "Audio processing will be disabled without a configured output device.") +
-            "<ul>"
-                "<li>" +
-                    tr("<b>Continue</b> without any outputs.") +
-                "</li>"
-                "<li>" +
-                    tr("<b>Reconfigure</b> the sound device settings.") +
-                "</li>"
-                "<li>" +
-                    tr("<b>Exit</b> the app.") +
-                "</li>"
-            "</ul></html>"
-    );
+    msgBox.setWindowTitle(tr("No audio output"));
+    // Just say what is wrong; the buttons say what can be done about it.
+    msgBox.setText(tr("No audio output is configured."));
+    msgBox.setInformativeText(tr("Plug in your audio device or controller, or pick an output."));
 
     QPushButton* continueButton =
-            msgBox.addButton(tr("Continue"), QMessageBox::ActionRole);
+            msgBox.addButton(tr("Continue without audio"), QMessageBox::ActionRole);
     QPushButton* reconfigureButton =
-            msgBox.addButton(tr("Reconfigure"), QMessageBox::ActionRole);
+            msgBox.addButton(tr("Sound settings"), QMessageBox::ActionRole);
     QPushButton* exitButton =
-            msgBox.addButton(tr("Exit"), QMessageBox::ActionRole);
+            msgBox.addButton(tr("Restart app"), QMessageBox::ActionRole);
 
     while (true)
     {
@@ -951,8 +942,13 @@ QDialog::DialogCode MixxxMainWindow::noOutputDlg(bool* continueClicked) {
             msgBox.show();
 
         } else if (msgBox.clickedButton() == exitButton) {
-            // Will finally quit Mixxx
-            return QDialog::Rejected;
+            // Quit, and start again: the usual reason to be here is a device that was not plugged
+            // in yet. Startup normally leaves through exit(), which skips aboutToQuit (so the new
+            // copy is started here) and then crashes while the main thread's database connection
+            // is torn down after Qt's connection table is already gone. Nothing has been
+            // changed or opened yet, so end the process without that clean-up.
+            startReplacementProcess();
+            std::_Exit(0);
         }
     }
 }

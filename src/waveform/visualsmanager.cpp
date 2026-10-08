@@ -44,7 +44,7 @@ void DeckVisuals::process(double remainingTimeTriggerSeconds) {
         m_pEndOfTrack->set(1.0);
     }
 
-    // Update the BPM even more slowly
+    // Update the BPM (every tick now, see kSlowUpdateDivider)
     m_SlowTickCnt = (m_SlowTickCnt + 1) % kSlowUpdateDivider;
     if (m_SlowTickCnt == 0 || !trackLoaded) {
         m_pVisualBpm->set(m_pEngineBpm->get());
