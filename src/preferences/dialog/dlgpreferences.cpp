@@ -16,6 +16,7 @@
 #include "library/library.h"
 #include "library/trackcollectionmanager.h"
 #include "moc_dlgpreferences.cpp"
+#include "controllers/dlgprefcontroller.h"
 #include "preferences/dialog/dlgpreflibrary.h"
 #include "preferences/dialog/dlgprefsound.h"
 #include "util/color/color.h"
@@ -539,6 +540,36 @@ bool DlgPreferences::pendingConfigValidOnAllPages() {
     return true;
 }
 
+namespace {
+
+/// Kiosk preferences: on Linux (the embedded device) most pages are hidden so nobody can walk
+/// into settings that break it. MIXXX_ALL_PREFS=1 shows everything again; MIXXX_KIOSK_PREFS=1
+/// turns the reduced list on elsewhere (to try it on the Mac).
+bool kioskPreferencesEnabled() {
+    if (qEnvironmentVariableIsSet("MIXXX_ALL_PREFS")) {
+        return false;
+    }
+    if (qEnvironmentVariableIsSet("MIXXX_KIOSK_PREFS")) {
+        return true;
+    }
+#if defined(Q_OS_LINUX)
+    return true;
+#else
+    return false;
+#endif
+}
+
+/// The pages kept in the kiosk list: Sound Hardware, Controllers (and each controller's page)
+/// and Interface.
+bool isKioskPreferencesPage(const QWidget* pPage) {
+    return qobject_cast<const DlgPrefSound*>(pPage) ||
+            qobject_cast<const DlgPrefControllers*>(pPage) ||
+            qobject_cast<const DlgPrefController*>(pPage) ||
+            qobject_cast<const DlgPrefInterface*>(pPage);
+}
+
+} // namespace
+
 void DlgPreferences::addPageWidget(const PreferencesPage& page,
         const QString& pageTitle,
         const QString& iconFile) {
@@ -549,6 +580,12 @@ void DlgPreferences::addPageWidget(const PreferencesPage& page,
     pageCopy.pTreeItem->setText(0, pageTitle);
     pageCopy.pTreeItem->setTextAlignment(0, Qt::AlignLeft | Qt::AlignVCenter);
     pageCopy.pTreeItem->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+
+    // Embedded build: only the pages that are safe to touch show in the list. The hidden pages
+    // are still created and wired up, so their saved settings keep being applied.
+    if (kioskPreferencesEnabled() && !isKioskPreferencesPage(pageCopy.pDlg)) {
+        pageCopy.pTreeItem->setHidden(true);
+    }
 
     connect(this, &DlgPreferences::showDlg, pageCopy.pDlg, &DlgPreferencePage::slotShow);
     connect(this, &DlgPreferences::closeDlg, pageCopy.pDlg, &DlgPreferencePage::slotHide);
