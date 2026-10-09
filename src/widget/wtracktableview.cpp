@@ -516,7 +516,8 @@ void WTrackTableView::showLoadPopup() {
         connect(pButton, &QPushButton::clicked, this, [this, pPopup, pButton, group, deck]() {
             if (isLoadBlockedByPlayingDeck(group)) {
                 // Keep the popup open and say why nothing loaded, then restore the label.
-                pButton->setText(tr("DECK %1 PLAYING").arg(deck));
+                Q_UNUSED(deck);
+                pButton->setText(tr("Pause deck before loading"));
                 const QString label = tr("Load %1").arg(deck);
                 QPointer<QPushButton> pGuard(pButton);
                 QTimer::singleShot(kLoadPopupMessageMs, pButton, [pGuard, label]() {

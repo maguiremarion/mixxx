@@ -388,10 +388,10 @@ void MixxxMainWindow::initialize() {
         const QString group = QStringLiteral("[Channel%1]").arg(deck);
         auto pEject = std::make_unique<ControlProxy>(
                 group, QStringLiteral("eject"), this, ControlFlag::NoAssertIfMissing);
-        pEject->connectValueChanged(this, [this, group, deck](double value) {
+        pEject->connectValueChanged(this, [this, group](double value) {
             if (value > 0.0 && ControlObject::toBool(ConfigKey(group, QStringLiteral("play")))) {
                 WNotice::show(this,
-                        tr("Pause Deck %1 before ejecting").arg(deck),
+                        tr("Deck must be paused to eject"),
                         mapFromGlobal(QCursor::pos()) + QPoint(0, 28),
                         true);
             }
