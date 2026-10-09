@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPointer>
 #include <QString>
 #include <memory>
 
@@ -106,6 +107,7 @@ class MixxxMainWindow : public QMainWindow {
     /// Event filter to block certain events (eg. tooltips if tooltips are disabled)
     bool eventFilter(QObject *obj, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void resizeEvent(QResizeEvent* pEvent) override;
 
   private:
     void initializeWindow();
@@ -131,6 +133,9 @@ class MixxxMainWindow : public QMainWindow {
 
     QWidget* m_pCentralWidget;
     LaunchImage* m_pLaunchImage;
+    // A second logo screen laid over the skin while its widgets and the waveform windows set up
+    // (a few seconds of black with stray lines in the corner), taken down shortly after startup.
+    QPointer<QWidget> m_pLaunchOverlay;
 #ifndef __APPLE__
     Qt::WindowStates m_prevState;
 #endif

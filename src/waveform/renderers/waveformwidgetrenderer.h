@@ -257,6 +257,8 @@ class WaveformWidgetRenderer {
     std::unique_ptr<ControlProxy> m_pGainControlObject;
     std::unique_ptr<ControlProxy> m_pTrackSamplesControlObject;
     double m_gain;
+    // For the one-line warning about odd gain / speed values (see onPreRender()).
+    bool m_oddValuesLogged = false;
     double m_trackSamples;
     double m_scaleFactor;
     double m_playMarkerPosition;   // 0.0 - left, 0.5 - center, 1.0 - right

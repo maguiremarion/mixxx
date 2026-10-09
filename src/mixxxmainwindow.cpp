@@ -533,10 +533,28 @@ void MixxxMainWindow::initialize() {
     // so it's now safe to write the new config to disk.
     m_pCoreServices->getSoundManager()->getConfig().writeToDisk();
 
+    // Keep the logo up while the skin appears: replacing the launch image shows a black window
+    // with half-drawn widgets for a couple of seconds while the waveform windows initialise.
+    // A fresh launch image goes on top of the skin first and is painted before the slow part.
+    // (MIXXX_NO_LAUNCH_OVERLAY=1 turns this off, to compare.)
+    if (m_pLaunchImage && !qEnvironmentVariableIsSet("MIXXX_NO_LAUNCH_OVERLAY")) {
+        if (LaunchImage* pOverlay = m_pSkinLoader->loadLaunchImage(this)) {
+            pOverlay->progress(100, QString());
+            pOverlay->setGeometry(rect());
+            pOverlay->show();
+            pOverlay->raise();
+            m_pLaunchOverlay = pOverlay;
+            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+        }
+    }
+
     // this has to be after the OpenGL widgets are created or depending on a
     // million different variables the first waveform may be horribly
     // corrupted. See bug 521509 -- bkgood ?? -- vrince
     setCentralWidget(m_pCentralWidget);
+    if (m_pLaunchOverlay) {
+        m_pLaunchOverlay->raise();
+    }
 
 #ifndef __APPLE__
     // Ask for permission to auto-hide the menu bar if applicable.
@@ -593,6 +611,23 @@ void MixxxMainWindow::initialize() {
         // because the sidebar is still in its initial state (top feature visible,
         // AutoDj is second from the top by default, all features collapsed).
         pLibrary->showAutoDJ();
+    }
+
+    // Take the overlay down once the skin has had a moment to paint its first frames.
+    if (m_pLaunchOverlay) {
+        QTimer::singleShot(700, this, [this]() {
+            if (m_pLaunchOverlay) {
+                m_pLaunchOverlay->hide();
+                m_pLaunchOverlay->deleteLater();
+            }
+        });
+    }
+}
+
+void MixxxMainWindow::resizeEvent(QResizeEvent* pEvent) {
+    QMainWindow::resizeEvent(pEvent);
+    if (m_pLaunchOverlay) {
+        m_pLaunchOverlay->setGeometry(rect());
     }
 }
 

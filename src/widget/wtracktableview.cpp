@@ -520,9 +520,14 @@ void WTrackTableView::showLoadPopup() {
                 pButton->setText(tr("Pause deck before loading"));
                 const QString label = tr("Load %1").arg(deck);
                 QPointer<QPushButton> pGuard(pButton);
-                QTimer::singleShot(kLoadPopupMessageMs, pButton, [pGuard, label]() {
+                QPointer<QFrame> pPopupGuard(pPopup);
+                QTimer::singleShot(kLoadPopupMessageMs, pButton, [pGuard, pPopupGuard, label]() {
                     if (pGuard) {
                         pGuard->setText(label);
+                    }
+                    if (pPopupGuard) {
+                        // back to the narrow size it had before the message widened it
+                        pPopupGuard->adjustSize();
                     }
                 });
                 pPopup->adjustSize();
