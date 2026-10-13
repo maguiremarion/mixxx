@@ -1,3 +1,4 @@
+#include <QPalette>
 #include <QResizeEvent>
 
 #include "widget/openglwindow.h"
@@ -43,6 +44,12 @@ void WGLWidget::showEvent(QShowEvent* event) {
         m_pContainerWidget->resize(size());
         m_pContainerWidget->show();
         m_pContainerWidget->setAutoFillBackground(true);
+        // Black behind the GL window: until it has drawn its first frame (every time its page is
+        // shown again, e.g. Browse -> Decks) what shows is this widget's background, which was the
+        // palette's white: a bright flash.
+        QPalette palette = m_pContainerWidget->palette();
+        palette.setColor(QPalette::Window, Qt::black);
+        m_pContainerWidget->setPalette(palette);
     }
     QWidget::showEvent(event);
 }

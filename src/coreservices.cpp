@@ -255,7 +255,17 @@ QString getCurrentXkbLayoutName() {
         XCloseDisplay(pDisplay);
         return {};
     }
-    char* pGroupName = XGetAtomName(pDisplay, pDesc->names->groups[state.group]);
+    // Under native Wayland the XWayland keymap can have no layout names yet (no X window has had the
+    // focus): the atom is then 0 (None), and asking for its name raises an X error that Xlib's default
+    // handler answers by exiting the whole program.
+    const Atom groupAtom = state.group < XkbNumKbdGroups ? pDesc->names->groups[state.group] : None;
+    if (groupAtom == None) {
+        qWarning() << "XKB layout has no group name";
+        XkbFreeNames(pDesc, XkbGroupNamesMask, True);
+        XCloseDisplay(pDisplay);
+        return {};
+    }
+    char* pGroupName = XGetAtomName(pDisplay, groupAtom);
     if (!pGroupName) {
         qWarning() << "XGetAtomName failed";
         XkbFreeNames(pDesc, XkbGroupNamesMask, True);

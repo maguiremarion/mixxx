@@ -13,7 +13,7 @@ class VisualPlayPosition;
 namespace {
 
 // Rate at which the playpos slider is updated
-constexpr int kUpdateRate = 30; // updates per second (stock: 15)
+constexpr int kUpdateRate = 20; // updates per second (stock: 15; 30 made the Pi repaint too often)
 // Number of kiUpdateRates that go by before we update BPM.
 // The BPM readout used to be refreshed only every 4th tick (a few times a second, "even more
 // slowly" than the rest), which made it visibly lag behind the tempo slider. Now every tick.

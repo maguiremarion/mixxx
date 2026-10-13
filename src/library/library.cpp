@@ -475,7 +475,7 @@ void Library::bindLibraryWidget(
 // [Library],SidebarOrder: comma-separated entries to show in the sidebar, in this order
 // (tracks, computer, recordings, history, rekordbox, serato, autodj, playlists, crates, analyze,
 // itunes). Entries that aren't listed are left out. This fork's default is
-// "rekordbox,serato,computer,recordings,history" (no Tracks: its table is then never loaded); an empty value shows everything.
+// "rekordbox,serato,computer,autodj,recordings,history" (no Tracks: its table is then never loaded); an empty value shows everything.
 // [Library],HiddenSidebarFeatures: entries to leave out on top of that, e.g. "history".
 // A hidden entry still exists and is fully wired up (Auto DJ, the track menus, ... keep
 // working), it is only not listed in the sidebar.
@@ -483,7 +483,7 @@ void Library::buildSidebar() {
     const QStringList order =
             (m_pConfig->exists(ConfigKey(kConfigGroup, "SidebarOrder"))
                             ? m_pConfig->getValueString(ConfigKey(kConfigGroup, "SidebarOrder"))
-                            : QStringLiteral("rekordbox,serato,computer,recordings,history"))
+                            : QStringLiteral("rekordbox,serato,computer,autodj,recordings,history"))
                     .toLower()
                     .split(QChar(','), Qt::SkipEmptyParts);
     const QStringList hidden =

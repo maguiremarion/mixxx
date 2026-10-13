@@ -163,17 +163,6 @@ void WaveformWidgetRenderer::onPreRender(VSyncTimeProvider* vsyncThread) {
 
     m_gain = m_pGainControlObject ? m_pGainControlObject->get() : 1.0;
 
-    // Diagnostic for an occasional "tall, blocky" first frame: say once, per odd stretch, what the
-    // renderer was working with (gain scales the height, the speed ratio the horizontal scale).
-    const bool oddValues = m_gain > 3.0 || m_gain < 0.2 || rateRatio > 1.5 || rateRatio < 0.5 ||
-            !std::isfinite(m_gain) || !std::isfinite(rateRatio);
-    if (oddValues && !m_oddValuesLogged) {
-        qWarning() << "WaveformWidgetRenderer" << m_group << "odd values: total_gain" << m_gain
-                   << "rate_ratio" << rateRatio << "zoom" << m_zoomFactor << "scale"
-                   << m_scaleFactor << "size" << m_width << "x" << m_height << "samples"
-                   << m_trackSamples;
-    }
-    m_oddValuesLogged = oddValues;
 
     // Compute visual sample to pixel ratio
     // Allow waveform to spread one visual sample across a hundred pixels

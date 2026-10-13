@@ -33,7 +33,12 @@ const QString kAppGroup = QStringLiteral("[App]");
 const QString kLegacyGroup = QStringLiteral("[Master]");
 
 // Utilize half of the available cores for adhoc analysis of tracks
+#if defined(Q_OS_LINUX)
+// One on the embedded (Linux) build: two decodes at once competed with the audio and the display.
+const int kNumberOfAnalyzerThreads = 1;
+#else
 const int kNumberOfAnalyzerThreads = math_max(1, QThread::idealThreadCount() / 2);
+#endif
 
 const QRegularExpression kDeckRegex(QStringLiteral("^\\[Channel(\\d+)\\]$"));
 const QRegularExpression kSamplerRegex(QStringLiteral("^\\[Sampler(\\d+)\\]$"));

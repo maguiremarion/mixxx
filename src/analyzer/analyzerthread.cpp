@@ -1,5 +1,11 @@
 #include "analyzer/analyzerthread.h"
 
+#if defined(Q_OS_LINUX)
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
+
 #include <mutex>
 
 #include "analyzer/analyzerbeats.h"
@@ -88,6 +94,13 @@ AnalyzerThread::AnalyzerThread(
 }
 
 void AnalyzerThread::doRun() {
+#if defined(Q_OS_LINUX)
+    // Analysing a loaded track decodes it end to end and kept a core at 100 % for ten seconds or
+    // more, right when you are mixing. Qt's thread priorities do nothing under the normal Linux
+    // scheduler, but a nice value is per thread there: run this one behind everything else.
+    setpriority(PRIO_PROCESS, static_cast<id_t>(syscall(SYS_gettid)), 15);
+#endif
+
     std::unique_ptr<AnalysisDao> pAnalysisDao;
     // The thread-local database connection  must not be closed
     // before returning from this function.

@@ -536,8 +536,7 @@ void MixxxMainWindow::initialize() {
     // Keep the logo up while the skin appears: replacing the launch image shows a black window
     // with half-drawn widgets for a couple of seconds while the waveform windows initialise.
     // A fresh launch image goes on top of the skin first and is painted before the slow part.
-    // (MIXXX_NO_LAUNCH_OVERLAY=1 turns this off, to compare.)
-    if (m_pLaunchImage && !qEnvironmentVariableIsSet("MIXXX_NO_LAUNCH_OVERLAY")) {
+    if (m_pLaunchImage) {
         if (LaunchImage* pOverlay = m_pSkinLoader->loadLaunchImage(this)) {
             pOverlay->progress(100, QString());
             pOverlay->setGeometry(rect());

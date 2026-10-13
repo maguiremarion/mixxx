@@ -237,6 +237,15 @@ Syncable* EngineSync::pickLeader(Syncable* triggering_syncable, bool newStatus) 
             && (m_pLeaderSyncable != triggering_syncable || newStatus) &&
             m_pLeaderSyncable->isPlaying() &&
             m_pLeaderSyncable->getBaseBpm().isValid());
+    // Like Pioneer / Rekordbox: a leader that is still playing keeps the role when another synced
+    // deck starts. Stock Mixxx could hand it to the deck that just started (it counted only
+    // audible decks, and picked the first one), so pausing deck 1 and starting it again took the
+    // master back from deck 2 and made deck 2 follow it. The role only moves when the leader stops,
+    // is turned off, or has no tempo.
+    if (leaderIsValid && newStatus && triggering_syncable != m_pLeaderSyncable) {
+        return m_pLeaderSyncable;
+    }
+
     Syncable* first_inaudible_playing_deck = nullptr;
     Syncable* first_other_playing_deck = nullptr;
     Syncable* first_playing_deck = nullptr;
