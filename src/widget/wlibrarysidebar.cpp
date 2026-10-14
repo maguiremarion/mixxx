@@ -148,6 +148,21 @@ QString wholeDiskDevice(const QString& partition) {
 #endif
 } // namespace
 
+bool WLibrarySidebar::isRemovableDriveRow(const QModelIndex& index) const {
+    const QList<QVariant> data = index.data(SidebarModel::DataRole).toList();
+    if (data.size() >= 3 && data.at(2).toString() == kDriveRowMarker) {
+        return true; // a Rekordbox drive row
+    }
+    // Serato database rows start with their folder; on a removable drive that is under one of the
+    // usual mount points.
+    if (data.isEmpty()) {
+        return false;
+    }
+    const QString path = data.at(0).toString();
+    return path.startsWith(QStringLiteral("/Volumes/")) || path.startsWith(QStringLiteral("/media/")) ||
+            path.startsWith(QStringLiteral("/run/media/")) || path.startsWith(QStringLiteral("/mnt/"));
+}
+
 bool WLibrarySidebar::ejectButtonAt(
         const QModelIndex& index, QRect* pRect, QString* pDrivePath) const {
     // Drive rows are marked by the Rekordbox feature: {path, state, "::driveRow::"}
@@ -299,6 +314,16 @@ void WLibrarySidebar::rowsInserted(const QModelIndex& parent, int start, int end
             parent == QModelIndex(m_expandWhenChildrenAppear)) {
         m_expandWhenChildrenAppear = QModelIndex();
         expand(parent);
+    }
+    // A drive that can be unplugged turned up under a top-level entry (Rekordbox, Serato): open that
+    // entry one level, so the drive is there to tap without first tapping the entry.
+    if (parent.isValid() && !parent.parent().isValid() && !isExpanded(parent)) {
+        for (int row = start; row <= end; ++row) {
+            if (isRemovableDriveRow(model()->index(row, 0, parent))) {
+                expand(parent);
+                break;
+            }
+        }
     }
 }
 

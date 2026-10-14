@@ -169,10 +169,14 @@ class MixxxMainWindow : public QMainWindow {
     std::vector<std::unique_ptr<ControlProxy>> m_ejectProxies;
     // [App],quit: quit without asking.
     std::unique_ptr<ControlPushButton> m_pQuitApp;
+    // [App],poweroff: quit, then power the computer off (Linux only; the Pi's Shut down button).
+    std::unique_ptr<ControlPushButton> m_pPowerOffApp;
+    bool m_powerOffRequested = false;
     bool m_skipExitConfirmation = false;
     void quitWithoutPrompt();
     void applyDialogStyleSheet();
     void startReplacementProcess();
+    void startPowerOffAfterExit();
     // [App],rescan_library / [App],library_scan_active: Library > Rescan Library
     // (Ctrl+Shift+L) as controls for skins and controllers.
     std::unique_ptr<ControlPushButton> m_pRescanLibrary;

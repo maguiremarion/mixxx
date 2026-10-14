@@ -376,8 +376,29 @@ void MixxxMainWindow::initialize() {
                     quitWithoutPrompt();
                 }
             });
+    // [App],poweroff: quit, and once Mixxx has really exited (library and settings saved), power
+    // the computer off. The Pi's Shut down button; unplugging it mid-write corrupted its SD card.
+    // Linux only (never a surprise on a laptop); the desktop session may power off without a password.
+    m_pPowerOffApp = std::make_unique<ControlPushButton>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("poweroff")));
+    connect(m_pPowerOffApp.get(),
+            &ControlPushButton::valueChanged,
+            this,
+            [this](double value) {
+                if (value <= 0.0) {
+                    return;
+                }
+#ifdef Q_OS_LINUX
+                m_powerOffRequested = true;
+                quitWithoutPrompt();
+#else
+                qWarning() << "[App],poweroff is only available on Linux";
+#endif
+            });
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() {
-        if (m_restartRequested) {
+        if (m_powerOffRequested) {
+            startPowerOffAfterExit();
+        } else if (m_restartRequested) {
             startReplacementProcess();
         }
     });
@@ -611,6 +632,15 @@ void MixxxMainWindow::initialize() {
         // AutoDj is second from the top by default, all features collapsed).
         pLibrary->showAutoDJ();
     }
+
+    // Drives that are already plugged in at start-up: look for Rekordbox / Serato libraries on them in
+    // the background (a drive plugged in later is picked up by the volume watcher), a little after
+    // the window is up so it doesn't compete with the first paint.
+    QTimer::singleShot(2500, this, [this]() {
+        if (auto pLibrary = m_pCoreServices->getLibrary()) {
+            pLibrary->preloadRekordboxDevices();
+        }
+    });
 
     // Take the overlay down once the skin has had a moment to paint its first frames.
     if (m_pLaunchOverlay) {
@@ -936,6 +966,21 @@ void MixxxMainWindow::startReplacementProcess() {
             QString::number(QCoreApplication::applicationPid()),
             QCoreApplication::applicationFilePath()};
     shellArgs += args;
+    QProcess::startDetached(QStringLiteral("/bin/sh"), shellArgs);
+#endif
+}
+
+void MixxxMainWindow::startPowerOffAfterExit() {
+#ifdef Q_OS_LINUX
+    // Wait for this process to be gone (so its files are closed), flush, then ask systemd.
+    // `systemctl poweroff` needs no password from the active local desktop session.
+    QStringList shellArgs{
+            QStringLiteral("-c"),
+            QStringLiteral("pid=$1; n=0; "
+                           "while kill -0 \"$pid\" 2>/dev/null && [ $n -lt 100 ]; do sleep 0.3; n=$((n+1)); done; "
+                           "sync; systemctl poweroff"),
+            QStringLiteral("sh"),
+            QString::number(QCoreApplication::applicationPid())};
     QProcess::startDetached(QStringLiteral("/bin/sh"), shellArgs);
 #endif
 }
@@ -1765,7 +1810,12 @@ void MixxxMainWindow::quitWithoutPrompt() {
     QCoreApplication::quit();
     // If shutting down hangs (the Pi's slow SD card, a stuck thread), don't leave the kiosk
     // with a dead screen and no way out.
-    QTimer::singleShot(15000, qApp, []() { std::_Exit(0); });
+    QTimer::singleShot(15000, qApp, [this]() {
+        if (m_powerOffRequested) {
+            startPowerOffAfterExit(); // still wanted, even though the exit was forced
+        }
+        std::_Exit(0);
+    });
 }
 
 void MixxxMainWindow::closeEvent(QCloseEvent *event) {
@@ -1774,6 +1824,7 @@ void MixxxMainWindow::closeEvent(QCloseEvent *event) {
     // render LaunchImage progress in the constructor.
     if (!m_skipExitConfirmation && !confirmExit()) {
         m_restartRequested = false; // exit refused, so no restart either
+        m_powerOffRequested = false;
         event->ignore();
         return;
     }

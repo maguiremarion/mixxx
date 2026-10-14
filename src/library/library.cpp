@@ -666,6 +666,9 @@ void Library::preloadRekordboxDevices() {
         if (auto* pRekordbox = dynamic_cast<RekordboxFeature*>(pFeature)) {
             pRekordbox->preloadDevices();
         }
+        if (auto* pSerato = dynamic_cast<SeratoFeature*>(pFeature)) {
+            pSerato->preloadDatabases();
+        }
     }
 }
 

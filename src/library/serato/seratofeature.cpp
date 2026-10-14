@@ -991,6 +991,14 @@ QString SeratoFeature::formatRootViewHtml() const {
 void SeratoFeature::refreshLibraryModels() {
 }
 
+void SeratoFeature::preloadDatabases() {
+    if (m_databasesFutureWatcher.isRunning()) {
+        return;
+    }
+    m_databasesFuture = QtConcurrent::run(findSeratoDatabases);
+    m_databasesFutureWatcher.setFuture(m_databasesFuture);
+}
+
 void SeratoFeature::activate() {
     qDebug() << "SeratoFeature::activate()";
 

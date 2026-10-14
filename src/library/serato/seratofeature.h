@@ -35,6 +35,9 @@ class SeratoFeature : public BaseExternalLibraryFeature {
 
   public slots:
     void activate() override;
+    /// Look for Serato databases in the background without switching views (like
+    /// RekordboxFeature::preloadDevices()), so a plugged-in drive shows up by itself.
+    void preloadDatabases();
     void activateChild(const QModelIndex& index) override;
     void refreshLibraryModels();
     void onSeratoDatabasesFound();
