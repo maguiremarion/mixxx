@@ -38,6 +38,7 @@ class WBeatSpinBox : public QDoubleSpinBox, public WBaseWidget {
     void stepBy(int steps) override;
     QString fractionString(int numerator, int denominator) const;
 
+    ConfigKey m_valueKey;
     ControlProxy m_valueControl;
     EffectParameterSlotBasePointer m_pParameterSlot;
     bool m_beatMode = true;

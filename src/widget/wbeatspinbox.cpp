@@ -31,6 +31,7 @@ WBeatSpinBox::WBeatSpinBox(QWidget* parent,
         double maximum)
         : QDoubleSpinBox(parent),
           WBaseWidget(this),
+          m_valueKey(configKey),
           m_valueControl(configKey, this, ControlFlag::NoAssertIfMissing),
           m_scaleFactor(1.0) {
     // replace the original QLineEdit by one that supports font scaling.
@@ -94,6 +95,21 @@ void WBeatSpinBox::updateUnitMode() {
                 m_logScale = (scaler == EffectManifestParameter::ValueScaler::Logarithmic ||
                                      scaler == EffectManifestParameter::ValueScaler::LogarithmicInverse) &&
                         m_rangeMin > 0.0;
+            }
+        }
+    }
+    // A beat length that is linked to the effect's depth knob (Auto Pan's period is, inverted) would
+    // just follow DEPTH, and the "default" would be whatever DEPTH happens to be (3.0697 for a
+    // depth of 0.23). Unlink it, and give it its own default.
+    if (beatMode && m_dragToChange && m_pParameterSlot && m_pParameterSlot->isLoaded()) {
+        ControlProxy linkType(
+                ConfigKey(m_valueKey.group, m_valueKey.item + QStringLiteral("_link_type")),
+                this,
+                ControlFlag::NoAssertIfMissing);
+        if (linkType.valid() && linkType.get() != 0.0) {
+            linkType.set(0.0);
+            if (const auto pManifest = m_pParameterSlot->getManifest()) {
+                m_valueControl.set(pManifest->getDefault());
             }
         }
     }
