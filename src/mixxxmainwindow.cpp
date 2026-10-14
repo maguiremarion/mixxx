@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QOpenGLContext>
+#include <QFile>
 #include <QProcess>
 #include <QTimer>
 #include <cstdlib>
@@ -399,7 +400,15 @@ void MixxxMainWindow::initialize() {
         if (m_powerOffRequested) {
             startPowerOffAfterExit();
         } else if (m_restartRequested) {
-            startReplacementProcess();
+            // Under the Pi's supervisor (pi/pi-files/mixxx-supervisor.sh) it starts the new copy
+            // itself, so that the new one is watched too: leave it a note instead.
+            const QByteArray marker = qgetenv("MIXXX_RESTART_MARKER");
+            if (!marker.isEmpty()) {
+                QFile file(QString::fromLocal8Bit(marker));
+                file.open(QIODevice::WriteOnly);
+            } else {
+                startReplacementProcess();
+            }
         }
     });
 
@@ -631,6 +640,24 @@ void MixxxMainWindow::initialize() {
         // because the sidebar is still in its initial state (top feature visible,
         // AutoDj is second from the top by default, all features collapsed).
         pLibrary->showAutoDJ();
+    }
+
+    // Heartbeat for the Pi's freeze watchdog: while the supervisor has set MIXXX_HEARTBEAT_FILE, this
+    // thread (the one that draws the screen) rewrites that file every second. If the interface
+    // freezes the file goes stale and the supervisor restarts Mixxx.
+    if (const QByteArray heartbeat = qgetenv("MIXXX_HEARTBEAT_FILE"); !heartbeat.isEmpty()) {
+        auto* pHeartbeatTimer = new QTimer(this);
+        pHeartbeatTimer->setInterval(1000);
+        connect(pHeartbeatTimer,
+                &QTimer::timeout,
+                this,
+                [path = QString::fromLocal8Bit(heartbeat)]() {
+                    QFile file(path);
+                    if (file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                        file.write("1");
+                    }
+                });
+        pHeartbeatTimer->start();
     }
 
     // Drives that are already plugged in at start-up: look for Rekordbox / Serato libraries on them in
@@ -1500,7 +1527,7 @@ void MixxxMainWindow::slotLibraryScanSummaryDlg(const LibraryScanResultSummary& 
     QMessageBox* pMsg = new QMessageBox();
     pMsg->setAttribute(Qt::WA_DeleteOnClose);
     pMsg->setTextFormat(Qt::RichText); // required to get bold text with <b> tags
-    pMsg->setWindowTitle(tr("Library scan finished"));
+    pMsg->setWindowTitle(tr("Library scan")); // short: the title bar cuts a long one off
 
     if (result.noDirectoriesConfigured) {
         pMsg->setText(tr("No music directories configured for scanning.") +
@@ -1510,41 +1537,44 @@ void MixxxMainWindow::slotLibraryScanSummaryDlg(const LibraryScanResultSummary& 
         return;
     }
 
-    QString summary =
-            tr("Scan took %1").arg(result.durationString) + QStringLiteral("<br><br>");
+    // (how long the scan took is not shown: it means nothing to a user)
+    // Plain wording: what the scan found, then how many tracks can be played now. What each line
+    // means (a scan compares the music folders and drives with the library):
+    //  - new: files that were not in the library before
+    //  - moved: the same file, now in another place
+    //  - removed: in the library, but the file is not there now (a drive that was unplugged, or a
+    //    deleted file); the track stays in the library and comes back by itself
+    //  - restored: a track that was missing and is there again (the drive is back)
+    const auto plural = [](int n, const QString& one, const QString& many) {
+        return n == 1 ? one : many.arg(n);
+    };
+    QString summary;
     if (result.numNewTracks == 0 &&
             result.numMovedTracks == 0 &&
             result.numNewMissingTracks == 0 &&
             result.numRediscoveredTracks == 0) {
-        summary += tr("No changes detected.") +
-                QStringLiteral("<br><b>") +
-                tr("%n track(s) in total", nullptr, result.tracksTotal) +
-                QStringLiteral("</b>");
+        summary += tr("No changes found.") + QStringLiteral("<br>");
     } else {
         if (result.numNewTracks != 0) {
-            summary += tr("%n new track(s) found", nullptr, result.numNewTracks) +
+            summary += plural(result.numNewTracks, tr("1 new track found"), tr("%1 new tracks found")) +
                     QStringLiteral("<br>");
         }
         if (result.numMovedTracks != 0) {
-            summary += tr("%n moved track(s) detected", nullptr, result.numMovedTracks) +
+            summary += plural(result.numMovedTracks, tr("1 track moved"), tr("%1 tracks moved")) +
                     QStringLiteral("<br>");
         }
         if (result.numNewMissingTracks != 0) {
-            summary += tr("%n track(s) missing (%1 total)",
-                    nullptr,
-                    result.numNewMissingTracks)
-                               .arg(result.numMissingTracks);
+            summary += plural(result.numNewMissingTracks, tr("1 track removed"), tr("%1 tracks removed")) +
+                    QStringLiteral("<br>");
         }
         if (result.numRediscoveredTracks != 0) {
-            summary += QStringLiteral("<br>") +
-                    tr("%n track(s) rediscovered",
-                            nullptr,
-                            result.numRediscoveredTracks);
+            summary += plural(result.numRediscoveredTracks, tr("1 track restored"), tr("%1 tracks restored")) +
+                    QStringLiteral("<br>");
         }
-        summary += QStringLiteral("<br><br><b>") +
-                tr("%n track(s) in total", nullptr, result.tracksTotal) +
-                QStringLiteral("</b>");
     }
+    summary += QStringLiteral("<br><b>") +
+            plural(result.tracksTotal, tr("1 total track available"), tr("%1 total tracks available")) +
+            QStringLiteral("</b>");
 
     pMsg->setText(summary);
     pMsg->show();

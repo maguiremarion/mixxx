@@ -5,6 +5,11 @@
 #include <QFileInfo>
 #include <QInputDialog>
 #include <QKeyEvent>
+#include <QBoxLayout>
+#include <QFrame>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QVBoxLayout>
 
 #include "controllers/controller.h"
 #include "controllers/controllerinputmappingtablemodel.h"
@@ -27,6 +32,7 @@
 #include "controllers/scripting/legacy/controllerscriptenginelegacy.h"
 #include "defs_urls.h"
 #include "moc_dlgprefcontroller.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "preferences/usersettings.h"
 #include "util/cmdlineargs.h"
 #include "util/desktophelper.h"
@@ -105,7 +111,7 @@ DlgPrefController::DlgPrefController(
     createLinkColor();
 
     QString refreshIconPath;
-    if (!Color::isDimColor(palette().text().color())) {
+    if (DlgPreferences::kioskMode() || !Color::isDimColor(palette().text().color())) {
         refreshIconPath = QStringLiteral(
                 ":/images/preferences/light/"
                 "ic_preferences_controllers_reload.svg");
@@ -114,7 +120,9 @@ DlgPrefController::DlgPrefController(
                 ":/images/preferences/dark/"
                 "ic_preferences_controllers_reload.svg");
     }
-    m_ui.btnRefreshMappingList->setIcon(QIcon(refreshIconPath));
+    m_ui.btnRefreshMappingList->setIcon(DlgPreferences::kioskMode()
+                    ? DlgPreferences::whiteIcon(refreshIconPath)
+                    : QIcon(refreshIconPath));
     connect(m_ui.btnRefreshMappingList,
             &QAbstractButton::clicked,
             this,
@@ -355,6 +363,116 @@ DlgPrefController::DlgPrefController(
     m_outputMappingsTabIndex = m_ui.controllerTabs->indexOf(m_ui.outputMappingsTab);
     m_settingsTabIndex = m_ui.controllerTabs->indexOf(m_ui.settingsTab);
     m_screensTabIndex = m_ui.controllerTabs->indexOf(m_ui.screensTab);
+
+    if (DlgPreferences::kioskMode()) {
+        applyKioskLayout();
+    }
+}
+
+void DlgPrefController::applyKioskLayout() {
+    // A plain, designed page instead of the technical one: the controller's name and what to do,
+    // a card with the on / off switch, a card with the mapping choice and what that mapping is.
+    // No wizard, device details, mapping tables or scripting. Sizes follow dialogs.qss: body text
+    // 15 px like the buttons and lists, 22 px for the name, 44 px tall controls.
+    m_ui.btnLearningWizard->hide();
+    m_ui.deviceInfoGroupLayoutWidget->hide();
+    m_ui.mappingInfoGroupLayoutWidget->hide();
+    m_ui.controllerTabs->hide();
+    m_ui.labelLoadMapping->hide();
+    m_ui.btnRefreshMappingList->setToolTip(tr("Reload the list of mappings"));
+    m_ui.labelWarning->setText(tr(
+            "<b>This mapping needs a newer controller engine than this version has, so "
+            "your controller may not work correctly. Choose another mapping, or turn the "
+            "controller off.</b>"));
+
+    auto makeCard = [](QWidget* pParent, QBoxLayout::Direction direction) {
+        auto* pCard = new QFrame(pParent);
+        pCard->setObjectName(QStringLiteral("PrefCard"));
+        auto* pCardLayout = new QBoxLayout(direction, pCard);
+        pCardLayout->setContentsMargins(20, 16, 20, 16);
+        pCardLayout->setSpacing(12);
+        return pCard;
+    };
+    auto makeText = [](const QString& text, const char* objectName, QWidget* pParent) {
+        auto* pLabel = new QLabel(text, pParent);
+        pLabel->setObjectName(QLatin1String(objectName));
+        pLabel->setWordWrap(true);
+        return pLabel;
+    };
+
+    auto* pContent = new QWidget(this);
+    auto* pLayout = new QVBoxLayout(pContent);
+    pLayout->setContentsMargins(28, 24, 28, 20);
+    pLayout->setSpacing(0);
+
+    pLayout->addWidget(m_ui.labelDeviceName);
+    pLayout->addSpacing(6);
+    pLayout->addWidget(makeText(tr("To use this controller, choose its mapping, tick \"Use this "
+                                   "controller\", then press Apply."),
+            "PageText",
+            pContent));
+    pLayout->addSpacing(22);
+
+    // The switch comes after the mapping: it can only be on once a mapping is chosen.
+    QFrame* pSwitchCard = makeCard(pContent, QBoxLayout::LeftToRight);
+    m_ui.chkEnabledDevice->setText(tr("Use this controller"));
+    static_cast<QBoxLayout*>(pSwitchCard->layout())->addWidget(m_ui.chkEnabledDevice);
+
+    // The mapping: a list, its reload button the same height, and what the chosen one is.
+    QFrame* pMappingCard = makeCard(pContent, QBoxLayout::TopToBottom);
+    auto* pMappingLayout = static_cast<QBoxLayout*>(pMappingCard->layout());
+    pMappingLayout->addWidget(makeText(tr("MAPPING"), "SectionLabel", pMappingCard));
+    auto* pMappingRow = new QHBoxLayout();
+    pMappingRow->setSpacing(10);
+    constexpr int kControlHeight = 52;
+    m_ui.comboBoxMapping->setFixedHeight(kControlHeight);
+    m_ui.comboBoxMapping->setMaximumWidth(520);
+    m_ui.comboBoxMapping->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_ui.btnRefreshMappingList->setFixedSize(kControlHeight, kControlHeight);
+    m_ui.btnRefreshMappingList->setIconSize(QSize(30, 30));
+    pMappingRow->addWidget(m_ui.comboBoxMapping, 1);
+    pMappingRow->addWidget(m_ui.btnRefreshMappingList);
+    pMappingRow->addStretch(1);
+    pMappingLayout->addLayout(pMappingRow);
+    m_pKioskMappingSummary = makeText(QString(), "MappingSummary", pMappingCard);
+    pMappingLayout->addWidget(m_pKioskMappingSummary);
+    pLayout->addWidget(pMappingCard);
+    pLayout->addSpacing(14);
+    pLayout->addWidget(pSwitchCard);
+
+    pLayout->addSpacing(14);
+    pLayout->addWidget(m_ui.groupBoxWarning);
+    pLayout->addStretch(1);
+
+    m_ui.gridLayoutPage->setContentsMargins(0, 0, 0, 0);
+    m_ui.gridLayoutPage->setSpacing(0);
+    m_ui.gridLayoutPage->addWidget(pContent, 0, 0, 1, 2);
+    for (int row = 0; row < 5; ++row) {
+        m_ui.gridLayoutPage->setRowStretch(row, row == 0 ? 1 : 0);
+    }
+    // showMapping() ran before this page existed: fill in the mapping line now
+    updateKioskMappingSummary(m_ui.labelMappingNameValue->text(),
+            m_ui.labelMappingDescriptionValue->text(),
+            m_ui.labelMappingAuthorValue->text());
+}
+
+/// The kiosk page's line about the chosen mapping (what it is, who made it).
+void DlgPrefController::updateKioskMappingSummary(
+        const QString& name, const QString& description, const QString& author) {
+    if (!m_pKioskMappingSummary) {
+        return;
+    }
+    if (name.isEmpty()) {
+        m_pKioskMappingSummary->setText(
+                tr("No mapping chosen yet. Pick the one made for this controller."));
+        return;
+    }
+    QString text = QStringLiteral("<b>%1</b>").arg(name.toHtmlEscaped());
+    if (!description.isEmpty()) {
+        text += QStringLiteral("<br>") + description.toHtmlEscaped().replace(QChar('\n'), QStringLiteral("<br>"));
+    }
+    Q_UNUSED(author); // no credit line: this page says what the mapping does, not who wrote it
+    m_pKioskMappingSummary->setText(text);
 }
 
 DlgPrefController::~DlgPrefController() {
@@ -563,8 +681,10 @@ void DlgPrefController::enumerateMappings(const QString& selectedMappingPath) {
     // qDebug() << "Enumerating mappings for controller" << m_pController->getName();
 
     // Check the text color of the palette for whether to use dark or light icons
+    // (on the dark kiosk always light ones, painted solid white)
+    const bool kiosk = DlgPreferences::kioskMode();
     QDir iconsPath;
-    if (!Color::isDimColor(palette().text().color())) {
+    if (kiosk || !Color::isDimColor(palette().text().color())) {
         iconsPath.setPath(":/images/preferences/light/");
     } else {
         iconsPath.setPath(":/images/preferences/dark/");
@@ -573,12 +693,14 @@ void DlgPrefController::enumerateMappings(const QString& selectedMappingPath) {
     // Insert a dummy item at the top to try to make it less confusing.
     // (We don't want the first found file showing up as the default item when a
     // user has their controller plugged in)
-    QIcon noMappingIcon(iconsPath.filePath("ic_none.svg"));
+    const QIcon noMappingIcon = kiosk ? DlgPreferences::whiteIcon(iconsPath.filePath("ic_none.svg"), 24)
+                                  : QIcon(iconsPath.filePath("ic_none.svg"));
     m_ui.comboBoxMapping->addItem(noMappingIcon, "No Mapping");
 
     MappingInfo match;
     // Enumerate user mappings
-    QIcon userMappingIcon(iconsPath.filePath("ic_custom.svg"));
+    const QIcon userMappingIcon = kiosk ? DlgPreferences::whiteIcon(iconsPath.filePath("ic_custom.svg"), 24)
+                                  : QIcon(iconsPath.filePath("ic_custom.svg"));
 
     // Reload user mappings to detect added, changed or removed mappings
     m_pControllerManager->getMainThreadUserMappingEnumerator()->loadSupportedMappings();
@@ -594,7 +716,8 @@ void DlgPrefController::enumerateMappings(const QString& selectedMappingPath) {
     m_ui.comboBoxMapping->insertSeparator(m_ui.comboBoxMapping->count());
 
     // Enumerate system mappings
-    QIcon systemMappingIcon(iconsPath.filePath("ic_mixxx_symbolic.svg"));
+    const QIcon systemMappingIcon = kiosk ? DlgPreferences::whiteIcon(iconsPath.filePath("ic_mixxx_symbolic.svg"), 24)
+                                  : QIcon(iconsPath.filePath("ic_mixxx_symbolic.svg"));
     MappingInfo systemMappingsMatch = enumerateMappingsFromEnumerator(
             m_pControllerManager->getMainThreadSystemMappingEnumerator(),
             systemMappingIcon);
@@ -855,7 +978,7 @@ void DlgPrefController::slotMappingSelected(int chosenIndex) {
     m_ui.controllerTabs->setTabEnabled(m_outputMappingsTabIndex, showMidiTabs);
 
     // Hide the entire QTabWidget if all tabs are removed
-    m_ui.controllerTabs->setVisible(getNumberOfVisibleTabs() > 0);
+    m_ui.controllerTabs->setVisible(!DlgPreferences::kioskMode() && getNumberOfVisibleTabs() > 0);
 }
 
 unsigned int DlgPrefController::getNumberOfVisibleTabs() {
@@ -1099,6 +1222,7 @@ void DlgPrefController::showMapping(std::shared_ptr<LegacyControllerMapping> pMa
     m_ui.labelMappingAuthorValue->setText(author);
     m_ui.labelMappingSupportLinks->setText(supportLinks);
     m_ui.labelMappingScriptFileLinks->setText(scriptFileLinks);
+    updateKioskMappingSummary(name, description, author);
 
     // Hide or show labels based on the presence of text
     m_ui.labelMappingName->setVisible(!name.isEmpty());
@@ -1260,7 +1384,7 @@ void DlgPrefController::showMapping(std::shared_ptr<LegacyControllerMapping> pMa
     slotOutputControlSearch();
 
     // Hide the entire QTabWidget if all tabs are removed
-    m_ui.controllerTabs->setVisible(getNumberOfVisibleTabs() > 0);
+    m_ui.controllerTabs->setVisible(!DlgPreferences::kioskMode() && getNumberOfVisibleTabs() > 0);
 
     // Set the first visible tab as the current tab
     int firstVisibleTabIndex = getIndexOfFirstVisibleTab();

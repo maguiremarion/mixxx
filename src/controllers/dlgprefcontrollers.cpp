@@ -1,5 +1,8 @@
 #include "controllers/dlgprefcontrollers.h"
 
+#include <QFrame>
+#include <QLabel>
+#include <QVBoxLayout>
 #include "control/controlproxy.h"
 #include "controllers/controller.h"
 #include "controllers/controllermanager.h"
@@ -106,10 +109,82 @@ DlgPrefControllers::DlgPrefControllers(DlgPreferences* pPreferences,
             m_pLinkColor,
             tr("MIDI Scripting with Javascript"),
             MIXXX_WIKI_MIDI_SCRIPTING_URL));
+
+    if (DlgPreferences::kioskMode()) {
+        applyKioskLayout();
+    }
 }
 
 DlgPrefControllers::~DlgPrefControllers() {
     destroyControllerWidgets();
+}
+
+/// The kiosk's overview page: what a controller and a mapping are, and the mapping files. Plain
+/// wording, no MIDI-through port, no links to the web; sizes follow dialogs.qss.
+void DlgPrefControllers::applyKioskLayout() {
+    auto makeText = [](const QString& text, const char* objectName, QWidget* pParent) {
+        auto* pLabel = new QLabel(text, pParent);
+        pLabel->setObjectName(QLatin1String(objectName));
+        pLabel->setWordWrap(true);
+        return pLabel;
+    };
+
+    auto* pContent = new QWidget(this);
+    auto* pLayout = new QVBoxLayout(pContent);
+    pLayout->setContentsMargins(28, 24, 28, 20);
+    pLayout->setSpacing(0);
+
+    pLayout->addWidget(makeText(tr("Controllers"), "PageHeading", pContent));
+    pLayout->addSpacing(6);
+    txtControllersOverview->setText(tr(
+            "Plug a DJ controller into a USB port and it appears under \"Controllers\" in "
+            "the list on the left. Select it there to switch it on and choose its mapping."));
+    txtControllersOverview->setObjectName(QStringLiteral("PageText"));
+    pLayout->addWidget(txtControllersOverview);
+    pLayout->addSpacing(22);
+
+    // Shown only when no controller was found (setupControllerWidgets()).
+    auto* pNoneCard = new QFrame(pContent);
+    pNoneCard->setObjectName(QStringLiteral("PrefCard"));
+    auto* pNoneLayout = new QVBoxLayout(pNoneCard);
+    pNoneLayout->setContentsMargins(20, 16, 20, 16);
+    txtNoControllersAvailable->setText(tr(
+            "No controller detected. Plug one in, then restart the app."));
+    txtNoControllersAvailable->setObjectName(QStringLiteral("PageNotice"));
+    txtNoControllersAvailable->setStyleSheet(QString());
+    txtNoControllersAvailable->setFont(QFont());
+    pNoneLayout->addWidget(txtNoControllersAvailable);
+    m_pNoControllersCard = pNoneCard;
+    pLayout->addWidget(pNoneCard);
+    pLayout->addSpacing(14);
+
+    auto* pFilesCard = new QFrame(pContent);
+    pFilesCard->setObjectName(QStringLiteral("PrefCard"));
+    auto* pFilesLayout = new QVBoxLayout(pFilesCard);
+    pFilesLayout->setContentsMargins(20, 16, 20, 16);
+    pFilesLayout->setSpacing(12);
+    pFilesLayout->addWidget(makeText(tr("MAPPING FILES"), "SectionLabel", pFilesCard));
+    txtMappingsOverview->setText(tr(
+            "A mapping tells the player what each button, knob and fader on a controller "
+            "does. To add one, put its .xml and .js files in the mapping files folder, then "
+            "press the reload button next to the Mapping list on the controller's page."));
+    txtMappingsOverview->setObjectName(QStringLiteral("PageText"));
+    pFilesLayout->addWidget(txtMappingsOverview);
+    btnOpenUserMappings->setText(tr("See available mapping files"));
+    btnOpenUserMappings->setFixedHeight(44);
+    pFilesLayout->addWidget(btnOpenUserMappings, 0, Qt::AlignLeft);
+    pLayout->addWidget(pFilesCard);
+    pLayout->addStretch(1);
+
+    // Everything else of the stock page (MIDI-through port, "how to make a mapping", web
+    // links) is left out.
+    groupBox_overview->hide();
+    groupBox_mappings->hide();
+    groupBox_3->hide();
+    gridLayout_3->removeItem(verticalSpacer);
+    gridLayout_3->setContentsMargins(0, 0, 0, 0);
+    gridLayout_3->addWidget(pContent, 3, 0);
+    gridLayout_3->setRowStretch(3, 1);
 }
 
 void DlgPrefControllers::openLocalFile(const QString& file) {
@@ -194,12 +269,26 @@ void DlgPrefControllers::setupControllerWidgets() {
     // treepane on the left.
     QList<Controller*> controllerList =
             m_pControllerManager->getControllerList(false, true);
+    if (DlgPreferences::kioskMode()) {
+        // Only MIDI controllers are offered. A DJ controller often shows up twice (its MIDI port
+        // and a second, HID, interface with its serial number in the name) and the second one
+        // has no mapping and does nothing.
+        controllerList.removeIf([](Controller* pController) {
+            return pController->getDataRepresentationProtocol() != DataRepresentationProtocol::MIDI;
+        });
+    }
     if (controllerList.isEmpty()) {
         // If no controllers are available, show the "No controllers available" message.
         txtNoControllersAvailable->setVisible(true);
+        if (m_pNoControllersCard) {
+            m_pNoControllersCard->setVisible(true);
+        }
         return;
     }
     txtNoControllersAvailable->setVisible(false);
+    if (m_pNoControllersCard) {
+        m_pNoControllersCard->setVisible(false);
+    }
 
     std::sort(controllerList.begin(), controllerList.end(), controllerCompare);
 
@@ -257,6 +346,11 @@ void DlgPrefControllers::setupControllerWidgets() {
         QFont temp = pControllerTreeItem->font(0);
         temp.setBold(pController->isOpen());
         pControllerTreeItem->setFont(0, temp);
+    }
+
+    if (DlgPreferences::kioskMode()) {
+        // A controller was found: show it in the list without a tap on "Controllers" first.
+        m_pDlgPreferences->expandTreeItem(m_pControllersRootItem);
     }
 }
 

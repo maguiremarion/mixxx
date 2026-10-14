@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QLabel>
+
 #include <qglobal.h>
 
 #include <memory>
@@ -95,6 +97,10 @@ class DlgPrefController : public DlgPreferencePage {
     void midiInputMappingsLearned(const MidiInputMappings& mappings);
 
   private:
+    void applyKioskLayout();
+    void updateKioskMappingSummary(
+            const QString& name, const QString& description, const QString& author);
+    QLabel* m_pKioskMappingSummary = nullptr;
     /// Used to selected the current mapping in the combobox and display the
     /// mapping information.
     void showMapping(std::shared_ptr<LegacyControllerMapping> mapping);

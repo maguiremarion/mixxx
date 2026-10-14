@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <QIcon>
 #include <QDir>
 #include <QEvent>
 #include <QRect>
@@ -71,6 +72,7 @@ class DlgPreferences : public QDialog, public Ui::DlgPreferencesDlg {
                     std::nullopt);
     void showSoundHardwareInputPage();
     void slotButtonPressed(QAbstractButton* pButton);
+    void handleButtonRole(QDialogButtonBox::ButtonRole role);
   signals:
     void closeDlg();
     void showDlg();
@@ -91,6 +93,13 @@ class DlgPreferences : public QDialog, public Ui::DlgPreferencesDlg {
     /// hard to use on the touch screen.
     void setVisible(bool visible) override;
 
+    /// True on the kiosk (see setVisible()): a short, user-facing set of pages with plain wording.
+    static bool kioskMode();
+
+    /// The icon at `path` painted solid white (the kiosk's pages are dark; some of Qt's own icon
+    /// states and the stock icon files came out black on them).
+    static QIcon whiteIcon(const QString& path, int size = 32);
+
   protected:
     bool eventFilter(QObject*, QEvent*) override;
     void changeEvent(QEvent* pEvent) override;
@@ -102,6 +111,7 @@ class DlgPreferences : public QDialog, public Ui::DlgPreferencesDlg {
     void fixSliderStyle();
     QList<PreferencesPage> m_allPages;
     void onShow();
+    void useKioskButtons();
     void onHide();
     QRect getDefaultGeometry();
 

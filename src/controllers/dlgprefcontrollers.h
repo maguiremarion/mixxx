@@ -51,6 +51,8 @@ class DlgPrefControllers : public DlgPreferencePage, public Ui::DlgPrefControlle
     void slotHighlightDevice(DlgPrefController* dialog, bool enabled);
 
   private:
+    void applyKioskLayout();
+    QWidget* m_pNoControllersCard = nullptr;
     void destroyControllerWidgets();
     void setupControllerWidgets();
     void openLocalFile(const QString& file);

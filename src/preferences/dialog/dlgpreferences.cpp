@@ -6,6 +6,8 @@
 #include <QMoveEvent>
 #include <QPalette>
 #include <QResizeEvent>
+#include <QHBoxLayout>
+#include <QPainter>
 #include <QScreen>
 #include <QTimer>
 #include <QScrollArea>
@@ -105,7 +107,8 @@ DlgPreferences::DlgPreferences(
     }
 
     // Check the text color of the palette for whether to use dark or light icons
-    if (!Color::isDimColor(palette().text().color())) {
+    // (the kiosk's pages are dark whatever the system palette is: always the light icons)
+    if (kioskMode() || !Color::isDimColor(palette().text().color())) {
         m_iconsPath.setPath(":/images/preferences/light/");
     } else {
         m_iconsPath.setPath(":/images/preferences/dark/");
@@ -117,7 +120,7 @@ DlgPreferences::DlgPreferences(
             m_pSoundDlg.get(),
             new QTreeWidgetItem(contentsTreeWidget, QTreeWidgetItem::Type));
     addPageWidget(m_soundPage,
-            tr("Sound Hardware"),
+            kioskMode() ? tr("Sound") : tr("Sound Hardware"),
             "ic_preferences_soundhardware.svg");
 
     DlgPrefLibrary* plibraryPage = new DlgPrefLibrary(this, m_pConfig, pLibrary);
@@ -269,6 +272,10 @@ DlgPreferences::DlgPreferences(
         }
     }
 
+    if (kioskMode()) {
+        useKioskButtons();
+    }
+
     labelWarning->hide();
     labelWarningIcon->hide();
     labelWarning->setText(tr(
@@ -378,7 +385,7 @@ void DlgPreferences::changeEvent(QEvent* pEvent) {
             setPalette(appPalette);
         }
         // Update m_iconsPath based on the new palette's text color
-        if (!Color::isDimColor(appPalette.text().color())) {
+        if (kioskMode() || !Color::isDimColor(appPalette.text().color())) {
             m_iconsPath.setPath(":/images/preferences/light/");
         } else {
             m_iconsPath.setPath(":/images/preferences/dark/");
@@ -387,7 +394,7 @@ void DlgPreferences::changeEvent(QEvent* pEvent) {
         // Reload tree item icons for all pages
         for (const PreferencesPage& page : std::as_const(m_allPages)) {
             if (page.pTreeItem && !page.iconFile.isEmpty()) {
-                page.pTreeItem->setIcon(0, QIcon(m_iconsPath.filePath(page.iconFile)));
+                page.pTreeItem->setIcon(0, kioskMode() ? whiteIcon(m_iconsPath.filePath(page.iconFile)) : QIcon(m_iconsPath.filePath(page.iconFile)));
             }
         }
 
@@ -498,7 +505,10 @@ void DlgPreferences::onShow() {
 }
 
 void DlgPreferences::slotButtonPressed(QAbstractButton* pButton) {
-    QDialogButtonBox::ButtonRole role = buttonBox->buttonRole(pButton);
+    handleButtonRole(buttonBox->buttonRole(pButton));
+}
+
+void DlgPreferences::handleButtonRole(QDialogButtonBox::ButtonRole role) {
     DlgPreferencePage* pCurrentPage = currentPage();
     switch (role) {
     case QDialogButtonBox::ResetRole:
@@ -572,6 +582,70 @@ bool kioskPreferencesEnabled() {
 
 } // namespace
 
+/// The kiosk's own button row: Restore Defaults on the left; Cancel, Apply and "Apply and Close"
+/// (the old OK, which always applied first, so the name says what it does) on the right; no Help button
+/// (the manual is not part of this build). The stock QDialogButtonBox orders its buttons by the
+/// platform's rules, so the row is built by hand; the buttons keep doing what their role says.
+void DlgPreferences::useKioskButtons() {
+    QPushButton* pOk = buttonBox->button(QDialogButtonBox::Ok);
+    QPushButton* pApply = buttonBox->button(QDialogButtonBox::Apply);
+    QPushButton* pCancel = buttonBox->button(QDialogButtonBox::Cancel);
+    QPushButton* pReset = buttonBox->button(QDialogButtonBox::RestoreDefaults);
+    if (!pOk || !pApply || !pCancel || !pReset || !buttonBox->parentWidget() ||
+            !buttonBox->parentWidget()->layout()) {
+        return;
+    }
+    pOk->setText(tr("Apply and Close"));
+    pApply->setText(tr("Apply"));
+    pCancel->setText(tr("Cancel"));
+    pReset->setText(tr("Restore Defaults"));
+
+    auto* pRow = new QWidget(buttonBox->parentWidget());
+    auto* pLayout = new QHBoxLayout(pRow);
+    pLayout->setContentsMargins(0, 0, 0, 0);
+    pLayout->setSpacing(8);
+    const struct {
+        QPushButton* pButton;
+        QDialogButtonBox::ButtonRole role;
+    } buttons[] = {
+            {pReset, QDialogButtonBox::ResetRole},
+            {pCancel, QDialogButtonBox::RejectRole},
+            {pApply, QDialogButtonBox::ApplyRole},
+            {pOk, QDialogButtonBox::AcceptRole},
+    };
+    for (const auto& entry : buttons) {
+        buttonBox->removeButton(entry.pButton);
+        entry.pButton->setParent(pRow);
+        pLayout->addWidget(entry.pButton);
+        if (entry.pButton == pReset) {
+            pLayout->addStretch(1);
+        }
+        const QDialogButtonBox::ButtonRole role = entry.role;
+        connect(entry.pButton, &QPushButton::clicked, this, [this, role]() {
+            handleButtonRole(role);
+        });
+    }
+    buttonBox->hide(); // keeps the Help button, which is never shown
+    buttonBox->parentWidget()->layout()->replaceWidget(buttonBox, pRow);
+}
+
+QIcon DlgPreferences::whiteIcon(const QString& path, int size) {
+    // Rendered at twice the size so it stays sharp on a high-DPI screen.
+    QPixmap pixmap = QIcon(path).pixmap(QSize(size * 2, size * 2));
+    if (pixmap.isNull()) {
+        return QIcon(path);
+    }
+    QPainter painter(&pixmap);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+    painter.fillRect(pixmap.rect(), Qt::white);
+    painter.end();
+    return QIcon(pixmap);
+}
+
+bool DlgPreferences::kioskMode() {
+    return kioskPreferencesEnabled();
+}
+
 void DlgPreferences::setVisible(bool visible) {
     const bool kiosk = visible && kioskPreferencesEnabled();
     if (kiosk && !isFullScreen()) {
@@ -579,7 +653,7 @@ void DlgPreferences::setVisible(bool visible) {
     }
     if (kiosk) {
         // A wider page list: "Controllers > DDJ-FLX2 ..." and "Sound Hardware" were cut off.
-        constexpr int kKioskPageListWidth = 300;
+        constexpr int kKioskPageListWidth = 220;
         contentsTreeWidget->setMinimumWidth(kKioskPageListWidth);
         splitter->setSizes({kKioskPageListWidth, std::max(400, width() - kKioskPageListWidth)});
     }
@@ -617,7 +691,7 @@ void DlgPreferences::addPageWidget(const PreferencesPage& page,
     PreferencesPage pageCopy = page;
     pageCopy.iconFile = iconFile;
     // Configure the tree button linked to the page
-    pageCopy.pTreeItem->setIcon(0, QIcon(m_iconsPath.filePath(iconFile)));
+    pageCopy.pTreeItem->setIcon(0, kioskMode() ? whiteIcon(m_iconsPath.filePath(iconFile)) : QIcon(m_iconsPath.filePath(iconFile)));
     pageCopy.pTreeItem->setText(0, pageTitle);
     pageCopy.pTreeItem->setTextAlignment(0, Qt::AlignLeft | Qt::AlignVCenter);
     pageCopy.pTreeItem->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);

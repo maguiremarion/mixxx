@@ -1,9 +1,12 @@
 #include "preferences/dialog/dlgprefsound.h"
+#include "preferences/dialog/dlgpreferences.h"
 
 #include <QBoxLayout>
 #include <QCheckBox>
+#include <QFrame>
 #include <QGroupBox>
 #include <QMessageBox>
+#include <QLabel>
 #include <QtDebug>
 #include <algorithm>
 #include <vector>
@@ -102,6 +105,35 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
           m_loading(false),
           m_configValid(true) {
     setupUi(this);
+    if (DlgPreferences::kioskMode()) {
+        // What this page is for, in a sentence, and none of the hint texts: the page keeps the
+        // measured latency and the buffer underflow counter.
+        deckBusHint->hide();
+        underflowCounterHint->hide();
+        audioBufferHint->hide();
+        realtimeHint->hide();
+        hardwareGuide->hide();
+        line->hide();
+        Hints->setTitle(tr("Diagnostics"));
+        // A card with what the page is for, with room around it and text the size of the lists
+        // and buttons below.
+        verticalLayout_2->setContentsMargins(24, 20, 24, 16);
+        verticalLayout_2->setSpacing(14);
+        auto* pCard = new QFrame(this);
+        pCard->setObjectName(QStringLiteral("PrefCard"));
+        auto* pCardLayout = new QVBoxLayout(pCard);
+        pCardLayout->setContentsMargins(20, 16, 20, 16);
+        auto* pIntro = new QLabel(tr(
+                "Choose where the sound goes. On Output, pick the device for the main speakers "
+                "and for your headphones. On Input, pick the device for a microphone or another "
+                "source. A smaller audio buffer means less delay, but the sound can crackle if "
+                "the system is busy."),
+                pCard);
+        pIntro->setWordWrap(true);
+        pIntro->setObjectName(QStringLiteral("PageText"));
+        pCardLayout->addWidget(pIntro);
+        verticalLayout_2->insertWidget(0, pCard);
+    }
     // Create text color for the wiki links
     createLinkColor();
 
