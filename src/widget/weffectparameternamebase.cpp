@@ -54,7 +54,7 @@ void WEffectParameterNameBase::setEffectParameterSlot(
 void WEffectParameterNameBase::parameterUpdated() {
     int valueWidth = 0;
     QFontMetrics metrics(font());
-    if (m_pParameterSlot) {
+    if (m_pParameterSlot && m_pParameterSlot->isLoaded()) {
         if (!m_pParameterSlot->shortName().isEmpty()) {
             m_text = m_pParameterSlot->shortName();
         } else {
@@ -95,6 +95,9 @@ void WEffectParameterNameBase::parameterUpdated() {
 }
 
 void WEffectParameterNameBase::showNewValue(double newValue) {
+    if (!m_showValueOnChange) {
+        return;
+    }
     // Don't show the value for a newly loaded parameter. 'valueChanged' is emitted
     // if this parameter is linked to the Meta knob
     if (m_parameterUpdated) {

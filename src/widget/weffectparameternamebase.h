@@ -14,6 +14,10 @@ class WEffectParameterNameBase : public WLabel {
 
     void setup(const QDomNode& node, const SkinContext& context) override = 0;
 
+    void setShowValueOnChange(bool show) {
+        m_showValueOnChange = show;
+    }
+
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -37,5 +41,6 @@ class WEffectParameterNameBase : public WLabel {
     QString m_text;
     QTimer m_displayNameResetTimer;
     bool m_parameterUpdated;
+    bool m_showValueOnChange = true;
     int m_widthHint;
 };

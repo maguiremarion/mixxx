@@ -35,6 +35,7 @@
 #include "widget/controlwidgetconnection.h"
 #include "widget/wbasewidget.h"
 #include "widget/wbattery.h"
+#include "widget/effectwidgetutils.h"
 #include "widget/wbeatspinbox.h"
 #include "widget/wbpmeditor.h"
 #include "widget/wcombobox.h"
@@ -1392,6 +1393,22 @@ QWidget* LegacySkinParser::parseBeatSpinBox(const QDomElement& node) {
     WBeatSpinBox* pSpinbox = new WBeatSpinBox(m_pParent, configKey);
     commonWidgetSetup(node, pSpinbox);
     pSpinbox->setup(node, *m_pContext);
+
+    // An effect's parameter (<EffectUnit>, <Effect>, <EffectParameter>): the box then knows whether
+    // it is a beat value.
+    if (m_pEffectsManager) {
+        EffectChainPointer pChain = EffectWidgetUtils::getEffectChainFromNode(
+                node, *m_pContext, m_pEffectsManager);
+        EffectSlotPointer pEffect =
+                EffectWidgetUtils::getEffectSlotFromNode(node, *m_pContext, pChain);
+        if (pEffect) {
+            EffectParameterSlotBasePointer pParameter =
+                    EffectWidgetUtils::getParameterSlotFromNode(node, *m_pContext, pEffect);
+            if (pParameter) {
+                pSpinbox->setEffectParameterSlot(pParameter);
+            }
+        }
+    }
 
     return pSpinbox;
 }

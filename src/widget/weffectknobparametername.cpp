@@ -10,6 +10,9 @@ WEffectKnobParameterName::WEffectKnobParameterName(
 
 void WEffectKnobParameterName::setup(const QDomNode& node, const SkinContext& context) {
     WLabel::setup(node, context);
+    // <ShowValueOnChange>false</ShowValueOnChange>: keep showing the name when the value changes
+    // (stock Mixxx shows the new value in its place for a moment).
+    setShowValueOnChange(context.selectBool(node, QStringLiteral("ShowValueOnChange"), true));
     // EffectWidgetUtils propagates NULLs so this is all safe.
     EffectChainPointer pChainSlot = EffectWidgetUtils::getEffectChainFromNode(
             node, context, m_pEffectsManager);

@@ -1,16 +1,27 @@
 #include "widget/wbeatspinbox.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include <QKeyEvent>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPolygonF>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 
 #include "control/controlobject.h"
 #include "control/controlproxy.h"
+#include "effects/backends/effectmanifestparameter.h"
+#include "effects/effectparameterslotbase.h"
 #include "moc_wbeatspinbox.cpp"
 #include "skin/legacy/skincontext.h"
 #include "util/math.h"
 
 namespace {
 const QRegularExpression kBlockListRegex(QStringLiteral("[^0-9.,/ ]"));
+constexpr int kDragStepPixels = 24;
+constexpr int kArrowZonePixels = 30; // width of the tap area at each end of the box
 } // namespace
 
 WBeatSpinBox::WBeatSpinBox(QWidget* parent,
@@ -42,13 +53,215 @@ WBeatSpinBox::WBeatSpinBox(QWidget* parent,
     m_valueControl.connectValueChanged(this, &WBeatSpinBox::slotControlValueChanged);
 }
 
+void WBeatSpinBox::setEffectParameterSlot(EffectParameterSlotBasePointer pParameterSlot) {
+    m_pParameterSlot = pParameterSlot;
+    if (m_pParameterSlot) {
+        connect(m_pParameterSlot.data(),
+                &EffectParameterSlotBase::updated,
+                this,
+                &WBeatSpinBox::updateUnitMode);
+    }
+    updateUnitMode();
+}
+
+void WBeatSpinBox::updateUnitMode() {
+    bool beatMode = true;
+    // No effect loaded in the slot: the box shows "---" like the name above it, not a value that
+    // belongs to nothing
+    m_noEffect = m_pParameterSlot && !m_pParameterSlot->isLoaded();
+    if (m_pParameterSlot) {
+        const EffectManifestParameterPointer pManifest = m_pParameterSlot->getManifest();
+        if (pManifest) {
+            const auto hint = pManifest->unitsHint();
+            // The unit hint is not always set (Flanger's speed, Auto Pan's period are beats too),
+            // so the parameters known to be beat lengths are named here.
+            const QString id = pManifest->id();
+            beatMode = hint == EffectManifestParameter::UnitsHint::Beats ||
+                    hint == EffectManifestParameter::UnitsHint::Beat ||
+                    id == QStringLiteral("delay_time") ||
+                    id == QStringLiteral("lfo_period") ||
+                    id == QStringLiteral("speed") ||
+                    id == QStringLiteral("period");
+            if (!beatMode) {
+                m_rangeMin = pManifest->getMinimum();
+                m_rangeMax = pManifest->getMaximum();
+                if (m_rangeMax <= m_rangeMin) {
+                    m_rangeMax = m_rangeMin + 1.0;
+                }
+                m_unitString = pManifest->unitString();
+                const auto scaler = pManifest->valueScaler();
+                m_toggle = scaler == EffectManifestParameter::ValueScaler::Toggle;
+                m_logScale = (scaler == EffectManifestParameter::ValueScaler::Logarithmic ||
+                                     scaler == EffectManifestParameter::ValueScaler::LogarithmicInverse) &&
+                        m_rangeMin > 0.0;
+            }
+        }
+    }
+    const QSignalBlocker blocker(this);
+    m_beatMode = beatMode;
+    if (beatMode) {
+        setDecimals(5);
+        setMinimum(0.03125);
+        setMaximum(512.00);
+    } else {
+        setDecimals(4);
+        setMinimum(m_rangeMin);
+        setMaximum(m_rangeMax);
+    }
+    setValue(m_valueControl.get());
+    lineEdit()->setText(textFromValue(value()));
+    if (m_hideUnlessBeats && parentWidget()) {
+        parentWidget()->setVisible(m_beatMode || m_noEffect);
+    }
+}
+
 void WBeatSpinBox::setup(const QDomNode& node, const SkinContext& context) {
     Q_UNUSED(node);
     m_scaleFactor = context.getScaleFactor();
     qobject_cast<WBeatLineEdit*>(lineEdit())->setScaleFactor(m_scaleFactor);
+
+    m_dragToChange = context.selectBool(node, QStringLiteral("DragToChange"), false);
+    // <HideUnlessBeats>true</HideUnlessBeats>: the group this box sits in is hidden while the shown
+    // effect has no beat-length parameter (with no effect loaded it stays, showing "---").
+    m_hideUnlessBeats = context.selectBool(node, QStringLiteral("HideUnlessBeats"), false);
+    if (m_dragToChange) {
+        // The text field would take the finger itself: let the box see the touches instead.
+        lineEdit()->setAttribute(Qt::WA_TransparentForMouseEvents);
+        lineEdit()->setReadOnly(true);
+    }
 }
 
+void WBeatSpinBox::paintEvent(QPaintEvent* pEvent) {
+    QDoubleSpinBox::paintEvent(pEvent);
+    if (!m_dragToChange) {
+        return;
+    }
+    // A left and a right arrow at the ends of the box (they also say "drag me sideways").
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0x8c, 0x8c, 0x94));
+    const double h = 5.0 * m_scaleFactor; // half the arrow's height
+    const double w = 6.0 * m_scaleFactor;
+    const double cy = height() / 2.0;
+    const double margin = 6.0 * m_scaleFactor;
+    painter.drawPolygon(QPolygonF({QPointF(margin, cy), QPointF(margin + w, cy - h), QPointF(margin + w, cy + h)}));
+    const double right = width() - margin;
+    painter.drawPolygon(QPolygonF({QPointF(right, cy), QPointF(right - w, cy - h), QPointF(right - w, cy + h)}));
+}
+
+void WBeatSpinBox::mousePressEvent(QMouseEvent* pEvent) {
+    if (m_dragToChange && pEvent->button() == Qt::LeftButton) {
+        const int x = pEvent->position().toPoint().x();
+        // A tap on an arrow steps once at once; the rest of the box is for dragging. (A drag that
+        // starts on an arrow still drags, and the step is only taken on release if it did not.)
+        m_arrowTapStep = x < kArrowZonePixels ? -1 : (x > width() - kArrowZonePixels ? 1 : 0);
+        m_dragMoved = false;
+        m_dragging = true;
+        m_dragLastX = pEvent->position().toPoint().x();
+        m_dragAccum = 0;
+        pEvent->accept();
+        return;
+    }
+    QDoubleSpinBox::mousePressEvent(pEvent);
+}
+
+void WBeatSpinBox::mouseMoveEvent(QMouseEvent* pEvent) {
+    if (!m_dragging) {
+        QDoubleSpinBox::mouseMoveEvent(pEvent);
+        return;
+    }
+    const int x = pEvent->position().toPoint().x();
+    if (std::abs(x - m_dragLastX) > 0) {
+        m_dragMoved = m_dragMoved || std::abs(m_dragAccum + x - m_dragLastX) >= 6;
+    }
+    m_dragAccum += x - m_dragLastX; // right is positive
+    m_dragLastX = x;
+    while (m_dragAccum >= kDragStepPixels) {
+        stepBy(1);
+        m_dragAccum -= kDragStepPixels;
+    }
+    while (m_dragAccum <= -kDragStepPixels) {
+        stepBy(-1);
+        m_dragAccum += kDragStepPixels;
+    }
+    pEvent->accept();
+}
+
+void WBeatSpinBox::mouseReleaseEvent(QMouseEvent* pEvent) {
+    if (m_dragging) {
+        m_dragging = false;
+        if (!m_dragMoved && m_arrowTapStep != 0) {
+            stepBy(m_arrowTapStep); // a tap on an arrow
+        }
+        pEvent->accept();
+        return;
+    }
+    QDoubleSpinBox::mouseReleaseEvent(pEvent);
+}
+
+namespace {
+// The values a drag steps through: each power of two and the one half way to the next (a "dotted"
+// value, 1.5 times), so 4, 6, 8, 12, 16... instead of 4, 8, 16: doubling was too big a jump.
+const QList<double>& dragSteps() {
+    static const QList<double> steps = [] {
+        QList<double> list;
+        for (double base = 1.0 / 16.0; base <= 256.0; base *= 2.0) {
+            list << base << base * 1.5;
+        }
+        return list;
+    }();
+    return steps;
+}
+} // namespace
+
 void WBeatSpinBox::stepBy(int steps) {
+    if (m_noEffect) {
+        return;
+    }
+    if (m_dragToChange && !m_beatMode) {
+        const double current = m_valueControl.get();
+        const double span = m_rangeMax - m_rangeMin;
+        double target;
+        if (m_toggle) {
+            target = current > 0.5 ? m_rangeMin : m_rangeMax;
+        } else if (m_logScale) {
+            target = current * std::pow(1.12, steps); // a cutoff in Hz: by ratios
+        } else {
+            double stepSize = span * 0.04;
+            if (span >= 20.0) {
+                stepSize = std::max(1.0, std::round(stepSize)); // whole BPM and the like
+            }
+            target = current + steps * stepSize;
+            if (span >= 20.0) {
+                target = std::round(target);
+            }
+        }
+        target = std::clamp(target, m_rangeMin, m_rangeMax);
+        m_valueControl.set(target);
+        const QSignalBlocker blocker(this);
+        setValue(m_valueControl.get());
+        return;
+    }
+    if (m_dragToChange) {
+        // Move along the list from the value the control has now (not the text: it may be a
+        // moment behind), then show what the control ended up with.
+        const QList<double>& list = dragSteps();
+        const double current = m_valueControl.get();
+        int nearest = 0;
+        for (int i = 1; i < list.size(); ++i) {
+            if (std::abs(list[i] - current) < std::abs(list[nearest] - current)) {
+                nearest = i;
+            }
+        }
+        const int target = std::clamp(nearest + steps, 0, static_cast<int>(list.size()) - 1);
+        m_valueControl.set(list[target]);
+        // A ControlProxy does not report a change it made itself, so the box would keep the old
+        // number: set it ourselves (without sending the value back).
+        const QSignalBlocker blocker(this);
+        setValue(m_valueControl.get());
+        return;
+    }
     double oldValue = m_valueControl.get();
     double newValue;
     QString temp = text();
@@ -82,6 +295,38 @@ QString WBeatSpinBox::fractionString(int numerator, int denominator) const {
 }
 
 QString WBeatSpinBox::textFromValue(double value) const {
+    if (m_noEffect) {
+        return kNoEffectString;
+    }
+    if (!m_beatMode) {
+        if (m_toggle) {
+            return value > 0.5 ? tr("On") : tr("Off");
+        }
+        const double span = m_rangeMax - m_rangeMin;
+        if (m_unitString.isEmpty() && span <= 2.5 && m_rangeMin >= -1.0 && m_rangeMax <= 1.0) {
+            // an amount from 0 to 1 (or -1 to 1): as a percentage
+            const int percent = qRound(value * 100.0);
+            return (m_rangeMin < 0.0 && percent > 0 ? QStringLiteral("+") : QString()) +
+                    QString::number(percent) + QStringLiteral("%");
+        }
+        // a real quantity (BPM, Hz, dB, ...): the number, with its unit
+        const double a = std::abs(value);
+        QString number;
+        if (m_unitString == QStringLiteral("Hz") && a >= 1000.0) {
+            number = QString::number(value / 1000.0, 'f', 1) + QStringLiteral(" k");
+        } else {
+            number = QString::number(value, 'f', a >= 100.0 ? 0 : (a >= 10.0 ? 1 : 2));
+            if (number.contains(QChar('.'))) {
+                while (number.endsWith(QChar('0'))) {
+                    number.chop(1);
+                }
+                if (number.endsWith(QChar('.'))) {
+                    number.chop(1);
+                }
+            }
+        }
+        return m_unitString.isEmpty() ? number : number + QChar(' ') + m_unitString;
+    }
     double dWholePart, dFracPart;
     dFracPart = modf(value, &dWholePart);
 

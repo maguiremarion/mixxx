@@ -74,7 +74,13 @@ void WEffectSelector::populate() {
     blockSignals(true);
     clear(); // Should hide popup
 
-    const QList<EffectManifestPointer> visibleEffectManifests = m_pVisibleEffectsList->getList();
+    // A to Z by the name that is shown (the list arrives in the order the effects were registered)
+    QList<EffectManifestPointer> visibleEffectManifests = m_pVisibleEffectsList->getList();
+    std::sort(visibleEffectManifests.begin(),
+            visibleEffectManifests.end(),
+            [](const EffectManifestPointer& a, const EffectManifestPointer& b) {
+                return QString::localeAwareCompare(a->displayName(), b->displayName()) < 0;
+            });
     // Add empty item: no effect
     addItem(kNoEffectString);
     setItemData(0, QVariant(tr("No effect loaded.")), Qt::ToolTipRole);
