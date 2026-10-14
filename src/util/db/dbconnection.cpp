@@ -1,5 +1,6 @@
 #include <QSqlDriver>
 #include <QSqlError>
+#include <QSqlQuery>
 
 #ifdef __SQLITE3__
 #include <sqlite3.h>
@@ -350,6 +351,20 @@ bool DbConnection::open() {
         m_sqlDatabase.close();
         return false; // abort
     }
+#ifdef __SQLITE3__
+    // Every commit used to cost several fsyncs (rollback journal + synchronous=FULL), which on the
+    // Pi's SD card froze the interface for 1-2 s each time a track was added to the library or an
+    // analysis was saved. With a write-ahead log and synchronous=NORMAL a commit is a plain append;
+    // the database still can't be corrupted by a power cut (the last few changes may be lost).
+    // MIXXX_DB_SAFE=1 keeps SQLite's defaults.
+    if (!qEnvironmentVariableIsSet("MIXXX_DB_SAFE")) {
+        QSqlQuery query(m_sqlDatabase);
+        if (!query.exec(QStringLiteral("PRAGMA journal_mode=WAL")) ||
+                !query.exec(QStringLiteral("PRAGMA synchronous=NORMAL"))) {
+            kLogger.warning() << "Failed to set the database journal mode:" << query.lastError();
+        }
+    }
+#endif
     return true;
 }
 

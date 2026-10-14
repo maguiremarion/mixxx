@@ -1,6 +1,9 @@
 #include "widget/weffectselector.h"
 
 #include <QAbstractItemView>
+#include <QScreen>
+#include <QScrollBar>
+#include <QScroller>
 #include <QStyleOptionComboBox>
 #include <QStylePainter>
 #include <QtDebug>
@@ -21,6 +24,10 @@ WEffectSelector::WEffectSelector(QWidget* pParent, EffectsManager* pEffectsManag
     // Allow click focus though so the list can always be opened by mouse,
     // see https://github.com/mixxxdj/mixxx/issues/10184
     setFocusPolicy(Qt::ClickFocus);
+    // The list scrolls with a finger drag (the skin's "combobox-popup: 0" makes it a plain list with
+    // a scroll bar instead of a menu with up / down arrows).
+    view()->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    QScroller::grabGesture(view()->viewport(), QScroller::LeftMouseButtonGesture);
 }
 
 void WEffectSelector::setup(const QDomNode& node, const SkinContext& context) {
@@ -146,14 +153,27 @@ void WEffectSelector::slotPresetListShowRequest(bool show) {
 /// both when clicking the down arrow and when triggering the control.
 void WEffectSelector::showPopup() {
     if (count() > 0) {
-        // The list is as wide as the box by default, which cut long effect names off.
+        // The list is as wide as the box by default, which cut long effect names off ("Key C...rison").
+        // Measured with the font the skin gives the list, so make that apply first.
+        view()->ensurePolished();
         const QFontMetrics metrics(view()->font());
         int widest = width();
         for (int i = 0; i < count(); ++i) {
-            widest = std::max(widest, metrics.horizontalAdvance(itemText(i)) + 48);
+            widest = std::max(widest, metrics.horizontalAdvance(itemText(i)) + 72);
         }
         view()->setMinimumWidth(widest);
         QComboBox::showPopup();
+        // Qt sizes the popup window to the box; make it as wide as the names and keep it on the
+        // screen (this selector sits at the right edge, so the list grows leftwards).
+        if (QWidget* pPopup = view()->window(); pPopup && pPopup != window()) {
+            const QScreen* pScreen = screen();
+            const QRect avail = pScreen ? pScreen->availableGeometry() : QRect(0, 0, 1024, 600);
+            QRect rect = pPopup->geometry();
+            rect.setWidth(std::min(std::max(rect.width(), widest + view()->verticalScrollBar()->sizeHint().width()),
+                    avail.width() - 16));
+            rect.moveLeft(std::clamp(rect.left(), avail.left() + 8, avail.right() - rect.width() - 8));
+            pPopup->setGeometry(rect);
+        }
         emit presetListVisibleChanged(true);
     }
 }
