@@ -804,6 +804,11 @@ QWidget* LegacySkinParser::parseWidgetStack(const QDomElement& node) {
     ControlObject* pCurrentPageControl = nullptr;
     ConfigKey currentPageConfigKey;
     QString currentpage_co = node.attribute("currentpage");
+    if (currentpage_co.isEmpty()) {
+        // <CurrentPage>[Group],item</CurrentPage>: the same, but as an element, so that a template
+        // can put a <Variable> in it (an attribute can't contain one).
+        currentpage_co = m_pContext->selectString(node, QStringLiteral("CurrentPage"));
+    }
     if (currentpage_co.length() > 0) {
         ConfigKey configKey = ConfigKey::parseCommaSeparated(currentpage_co);
         bool persist = m_pContext->selectAttributeBool(node, "persist", false);

@@ -6,15 +6,10 @@
 #include <QDrag>
 #include <QDragEnterEvent>
 #include <QDropEvent>
-#include <QFrame>
 #include <QGuiApplication>
-#include <QHBoxLayout>
 #include <QMimeData>
 #include <QMouseEvent>
-#include <QPointer>
-#include <QPushButton>
-#include <QScreen>
-#include <QTimer>
+#include <QPoint>
 
 #include "engine/controls/cuecontrol.h"
 #include "mixer/playerinfo.h"
@@ -33,24 +28,6 @@ constexpr int kDefaultDimBrightThreshold = 127;
 
 using namespace mixxx::hotcuedrag;
 
-namespace {
-// How long a set pad has to be held before the delete popup opens.
-constexpr int kLongPressMs = 600;
-
-CuePointer findHotCue(const TrackPointer& pTrack, int hotcue) {
-    if (!pTrack) {
-        return CuePointer();
-    }
-    const QList<CuePointer> cueList = pTrack->getCuePoints();
-    for (const auto& pCue : cueList) {
-        if (pCue->getHotCue() == hotcue) {
-            return pCue;
-        }
-    }
-    return CuePointer();
-}
-} // namespace
-
 WHotcueButton::WHotcueButton(QWidget* pParent, const QString& group)
         : WPushButton(pParent),
           m_group(group),
@@ -62,9 +39,6 @@ WHotcueButton::WHotcueButton(QWidget* pParent, const QString& group)
           m_bCueColorIsLight(false),
           m_bCueColorIsDark(false) {
     setAcceptDrops(true);
-    m_longPressTimer.setSingleShot(true);
-    m_longPressTimer.setInterval(kLongPressMs);
-    connect(&m_longPressTimer, &QTimer::timeout, this, &WHotcueButton::showDeletePopup);
 }
 
 void WHotcueButton::setup(const QDomNode& node, const SkinContext& context) {
@@ -244,113 +218,9 @@ void WHotcueButton::mousePressEvent(QMouseEvent* pEvent) {
     // Except when Shift is pressed which is used to swap hotcues without
     // starting the preview.
     if (!pEvent->modifiers().testFlag(Qt::ShiftModifier)) {
-        // Only a pad that is already set can be long-pressed (pressing an empty pad
-        // sets a cue, which must not immediately arm the delete popup).
-        const bool wasSet = readDisplayValue() != 0;
-        m_pendingPress = false;
-        m_holdHandled = false;
-        closeDeletePopup();
-        if (wasSet && pEvent->button() == Qt::LeftButton) {
-            // A set pad can be tapped (jump to the cue) or held (delete popup). Don't tell the
-            // deck anything yet, or a hold would always jump first: a tap is sent when the
-            // finger lifts, a hold never jumps.
-            DragAndDropHelper::mousePressed(pEvent);
-            m_pressPos = pEvent->pos();
-            m_pendingPress = true;
-            m_longPressTimer.start();
-            return;
-        }
         WPushButton::mousePressEvent(pEvent);
         DragAndDropHelper::mousePressed(pEvent);
     }
-}
-
-void WHotcueButton::showDeletePopup() {
-    TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
-    QWidget* pWindow = window();
-    if (!findHotCue(pTrack, m_hotcue) || !pWindow) {
-        return;
-    }
-
-    // It was a hold, not a tap: the press was never sent, so there is nothing to let go of (and
-    // the pad must not jump). The finger's release is swallowed (mouseReleaseEvent()).
-    m_pendingPress = false;
-    m_holdHandled = true;
-    closeDeletePopup();
-
-    // A child widget of the main window, not a Qt::Popup window: a popup relies on the window
-    // system's mouse grab, and on the Pi (XWayland + touch emulation) taps on it never arrived,
-    // so "Delete" did nothing.
-    m_pDeletePopup = new QFrame(pWindow);
-    QFrame* pPopup = m_pDeletePopup;
-    pPopup->setObjectName(QStringLiteral("CueDeletePopup"));
-    pPopup->setAttribute(Qt::WA_StyledBackground);
-    // Sized for a finger, like the other on-screen messages (the keyboard, the eject notice).
-    // Inline, so it doesn't depend on skin rules matching a widget that isn't in the skin.
-    pPopup->setStyleSheet(QStringLiteral(
-            "QFrame#CueDeletePopup { background-color: #181818; border: 1px solid #3478f2; }"
-            "QPushButton#CueDeleteButton { color: #ffffff; background-color: #262626;"
-            "  font-size: 19px; font-weight: 600; border: none; border-radius: 0;"
-            "  padding: 8px 16px; margin: 4px; }"
-            "QPushButton#CueDeleteButton:pressed { background-color: #d63a3a; }"));
-    auto* pLayout = new QHBoxLayout(pPopup);
-    pLayout->setContentsMargins(0, 0, 0, 0);
-    pLayout->setSpacing(0);
-
-    auto* pDelete = new QPushButton(
-            tr("Delete cue %1").arg(QChar('A' + m_hotcue)), pPopup);
-    pDelete->setObjectName(QStringLiteral("CueDeleteButton"));
-    pDelete->setFocusPolicy(Qt::NoFocus);
-    pLayout->addWidget(pDelete);
-    connect(pDelete, &QPushButton::clicked, this, [this]() {
-        closeDeletePopup();
-        TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
-        if (CuePointer pCue = findHotCue(pTrack, m_hotcue)) {
-            pTrack->removeCue(pCue);
-        }
-    });
-
-    // Centred on the pad's cell, so it appears right where the finger is held. (Not above the
-    // cell: that is the waveform area, and the waveforms are native windows, drawn over every
-    // ordinary widget, so a popup there is cut off.) Kept inside the window.
-    pPopup->adjustSize();
-    const QPoint cellTopLeft = mapTo(pWindow, QPoint(0, 0));
-    QPoint pos(cellTopLeft.x() + (width() - pPopup->width()) / 2,
-            cellTopLeft.y()); // top level with the cell and growing downwards, away from the waveforms
-    pos.setX(qBound(0, pos.x(), std::max(0, pWindow->width() - pPopup->width())));
-    pos.setY(qBound(0, pos.y(), std::max(0, pWindow->height() - pPopup->height())));
-    pPopup->move(pos);
-    pPopup->show();
-    pPopup->raise();
-
-    // Any tap elsewhere dismisses it (the tap still goes through), and it goes by itself.
-    qApp->installEventFilter(this);
-    QTimer::singleShot(6000, pPopup, [this, pPopup]() {
-        if (m_pDeletePopup == pPopup) {
-            closeDeletePopup();
-        }
-    });
-}
-
-void WHotcueButton::closeDeletePopup() {
-    if (m_pDeletePopup) {
-        qApp->removeEventFilter(this);
-        m_pDeletePopup->hide();
-        m_pDeletePopup->deleteLater();
-        m_pDeletePopup = nullptr;
-    }
-}
-
-bool WHotcueButton::eventFilter(QObject* pObj, QEvent* pEvent) {
-    if (m_pDeletePopup &&
-            (pEvent->type() == QEvent::MouseButtonPress ||
-                    pEvent->type() == QEvent::TouchBegin)) {
-        auto* pWidget = qobject_cast<QWidget*>(pObj);
-        if (pWidget && !m_pDeletePopup->isAncestorOf(pWidget) && pWidget != m_pDeletePopup) {
-            closeDeletePopup();
-        }
-    }
-    return WPushButton::eventFilter(pObj, pEvent);
 }
 
 void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
@@ -359,34 +229,10 @@ void WHotcueButton::mouseReleaseEvent(QMouseEvent* pEvent) {
         // Don't handle stray release events
         return;
     }
-    m_longPressTimer.stop();
-    if (m_holdHandled) {
-        m_holdHandled = false; // the finger lifting after a hold: nothing to send
-        return;
-    }
-    if (m_pendingPress) {
-        // A tap on a set pad: send the press now, then the release.
-        m_pendingPress = false;
-        if (!rect().contains(pEvent->pos())) {
-            return; // lifted outside the pad: cancelled
-        }
-        QMouseEvent press(QEvent::MouseButtonPress,
-                pEvent->position(),
-                pEvent->globalPosition(),
-                Qt::LeftButton,
-                Qt::LeftButton,
-                pEvent->modifiers());
-        WPushButton::mousePressEvent(&press);
-    }
     WPushButton::mouseReleaseEvent(pEvent);
 }
 
 void WHotcueButton::mouseMoveEvent(QMouseEvent* pEvent) {
-    // Moving away (or starting a drag-swap) cancels the long press.
-    if (m_longPressTimer.isActive() &&
-            (pEvent->pos() - m_pressPos).manhattanLength() > QApplication::startDragDistance()) {
-        m_longPressTimer.stop(); // moved: no longer a hold (a lift still counts as a tap)
-    }
     TrackPointer pTrack = PlayerInfo::instance().getTrackInfo(m_group);
     if (!pTrack) {
         return;
@@ -418,7 +264,6 @@ void WHotcueButton::mouseMoveEvent(QMouseEvent* pEvent) {
         const QPixmap currLook = grab(rect().marginsRemoved(m_dndRectMargins));
         pDrag->setDragCursor(currLook, Qt::MoveAction);
 
-        m_pendingPress = false; // a drag-swap, not a tap: the pad never jumps
         m_dragging = true;
         pDrag->exec();
         m_dragging = false;

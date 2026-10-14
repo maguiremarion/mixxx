@@ -1,10 +1,6 @@
 #pragma once
 
-#include <QFrame>
-#include <QPoint>
-#include <QPointer>
 #include <QString>
-#include <QTimer>
 
 #include "util/parented_ptr.h"
 #include "widget/wcuemenupopup.h"
@@ -43,13 +39,8 @@ class WHotcueButton : public WPushButton {
     void dragEnterEvent(QDragEnterEvent* pEvent) override;
     void dropEvent(QDropEvent* pEvent) override;
     void restyleAndRepaint() override;
-    bool eventFilter(QObject* pObj, QEvent* pEvent) override;
 
   private slots:
-    /// Holding a set pad opens a small "Delete" popup (easier than the right-click
-    /// cue menu on a touchscreen / in a small window).
-    void showDeletePopup();
-    void closeDeletePopup();
     void slotColorChanged(double color);
     void slotTypeChanged(double type);
     void slotUpdateDirection(double = 0);
@@ -75,13 +66,6 @@ class WHotcueButton : public WPushButton {
     /// Callers should not use m_pCueMenuPopup directly because it is lazy-loaded.
     /// Use getCueMenuPopup() instead to ensure the menu is populated.
     parented_ptr<WCueMenuPopup> m_pCueMenuPopup;
-    QTimer m_longPressTimer;
-    /// A left press on a set pad that hasn't been sent to the deck yet (tap or hold?).
-    bool m_pendingPress = false;
-    /// The press became a hold (the delete popup opened): swallow the release that ends it.
-    bool m_holdHandled = false;
-    QPointer<QFrame> m_pDeletePopup;
-    QPoint m_pressPos;
     int m_cueColorDimThreshold;
     bool m_bCueColorDimmed;
     bool m_bCueColorIsLight;

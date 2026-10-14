@@ -7,6 +7,7 @@
 #include <QPalette>
 #include <QResizeEvent>
 #include <QScreen>
+#include <QTimer>
 #include <QScrollArea>
 #include <QSlider>
 #include <QStyle>
@@ -83,6 +84,11 @@ DlgPreferences::DlgPreferences(
     buttonBox->button(QDialogButtonBox::Cancel)->setText(tr("&Cancel"));
     //: Preferences standard buttons: consider the other buttons to choose a unique Alt hotkey (&)
     buttonBox->button(QDialogButtonBox::Ok)->setText(tr("&Ok"));
+
+    // No icons on OK / Apply / Cancel: text only (flat look).
+    for (QAbstractButton* pButton : buttonBox->buttons()) {
+        pButton->setIcon(QIcon());
+    }
 
     connect(buttonBox,
             QOverload<QAbstractButton*>::of(&QDialogButtonBox::clicked),
@@ -404,6 +410,11 @@ void DlgPreferences::onHide() {
 }
 
 void DlgPreferences::onShow() {
+    if (isFullScreen()) {
+        // fullscreen kiosk: the window manager sizes it, nothing to restore
+        emit showDlg();
+        return;
+    }
     // init m_geometry
     if (m_geometry.length() < 4) {
         // load default values (optimum size)
@@ -558,6 +569,36 @@ bool kioskPreferencesEnabled() {
     return false;
 #endif
 }
+
+} // namespace
+
+void DlgPreferences::setVisible(bool visible) {
+    const bool kiosk = visible && kioskPreferencesEnabled();
+    if (kiosk && !isFullScreen()) {
+        setWindowState(windowState() | Qt::WindowFullScreen);
+    }
+    if (kiosk) {
+        // A wider page list: "Controllers > DDJ-FLX2 ..." and "Sound Hardware" were cut off.
+        constexpr int kKioskPageListWidth = 300;
+        contentsTreeWidget->setMinimumWidth(kKioskPageListWidth);
+        splitter->setSizes({kKioskPageListWidth, std::max(400, width() - kKioskPageListWidth)});
+    }
+    QDialog::setVisible(visible);
+    if (kiosk) {
+        // A window manager may ignore the fullscreen request for a dialog that has a parent
+        // (labwc did: the window came up small, high on the screen). Then ask for the screen's size.
+        QTimer::singleShot(0, this, [this]() {
+            const QScreen* pScreen = mixxx::widgethelper::getScreenForWidgetOrApplication(*this);
+            if (pScreen && isVisible() && size() != pScreen->size()) {
+                setGeometry(pScreen->geometry());
+            }
+            splitter->setSizes({contentsTreeWidget->minimumWidth(),
+                    std::max(400, width() - contentsTreeWidget->minimumWidth())});
+        });
+    }
+}
+
+namespace {
 
 /// The pages kept in the kiosk list: Sound Hardware, Controllers (and each controller's page)
 /// and Interface.

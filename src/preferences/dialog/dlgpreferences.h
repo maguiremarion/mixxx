@@ -86,6 +86,11 @@ class DlgPreferences : public QDialog, public Ui::DlgPreferencesDlg {
     void tooltipModeChanged(mixxx::preferences::Tooltips tooltipMode);
     void menuBarAutoHideChanged();
 
+  public:
+    /// On the kiosk (see kioskPreferencesEnabled()) the dialog opens fullscreen: a small window is
+    /// hard to use on the touch screen.
+    void setVisible(bool visible) override;
+
   protected:
     bool eventFilter(QObject*, QEvent*) override;
     void changeEvent(QEvent* pEvent) override;
