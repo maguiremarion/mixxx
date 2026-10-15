@@ -141,9 +141,13 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
         queryButton->setToolTip(tr("Look for audio devices that were plugged in or removed"));
         pCardRow->addWidget(queryButton, 0, Qt::AlignVCenter);
         pCardLayout->addLayout(pCardRow);
-        // The lists are only as tall as their rows: no stretching pane under them
-        outputVSpacer->changeSize(0, 0, QSizePolicy::Minimum, QSizePolicy::Minimum);
-        inputVSpacer->changeSize(0, 0, QSizePolicy::Minimum, QSizePolicy::Minimum);
+        // The lists are only as tall as their rows: no stretching pane under them. Both tabs are
+        // as tall as the taller one, so the extra height goes to the spacer at the bottom, never
+        // between the rows: Output and Input get the same row gap.
+        outputVSpacer->changeSize(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
+        inputVSpacer->changeSize(0, 0, QSizePolicy::Minimum, QSizePolicy::Expanding);
+        outputVLayout->setSpacing(10);
+        inputVLayout->setSpacing(10);
         ioTabs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
         verticalLayout_2->addStretch(1);
         // The longest device name must not make the page wider than the screen.
@@ -787,6 +791,9 @@ void DlgPrefSound::addPath(const AudioOutput& output) {
             AudioPath::isIndexed(type) ? output.getIndex() : 0);
     insertItem(pSoundItem, outputVLayout);
     connectSoundItem(pSoundItem);
+    if (DlgPreferences::kioskMode()) {
+        pSoundItem->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    }
 
     setScrollSafeGuardForAllInputWidgets(pSoundItem);
 }
@@ -804,6 +811,9 @@ void DlgPrefSound::addPath(const AudioInput& input) {
             AudioPath::isIndexed(type) ? input.getIndex() : 0);
     connectSoundItem(pSoundItem);
     insertItem(pSoundItem, inputVLayout);
+    if (DlgPreferences::kioskMode()) {
+        pSoundItem->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+    }
 
     setScrollSafeGuardForAllInputWidgets(pSoundItem);
 }

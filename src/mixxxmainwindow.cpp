@@ -6,6 +6,8 @@
 #include <QFileDialog>
 #include <QOpenGLContext>
 #include <QFile>
+#include <QMenu>
+#include <QMouseEvent>
 #include <QProcess>
 #include <QTimer>
 #include <cstdlib>
@@ -40,6 +42,7 @@
 #include "broadcast/broadcastmanager.h"
 #endif
 #include "control/controlindicatortimer.h"
+#include "control/controlobject.h"
 #include "control/controlpushbutton.h"
 #include "library/volumewatcher.h"
 #include "library/library.h"
@@ -79,6 +82,66 @@
 namespace {
 const ConfigKey kHideMenuBarConfigKey = ConfigKey("[Config]", "hide_menubar");
 const ConfigKey kMenuBarHintConfigKey = ConfigKey("[Config]", "show_menubar_hint");
+} // namespace
+
+namespace {
+void startDetachedAny(const QStringList& candidates) {
+    for (const QString& program : candidates) {
+        if (QProcess::startDetached(program, {})) {
+            return;
+        }
+    }
+    qWarning() << "Backdoor menu: none of" << candidates << "could be started";
+}
+
+// Right click on the top 52 px of the main window: the mouse-only way to the desktop tools.
+class BackdoorMenuFilter : public QObject {
+  public:
+    explicit BackdoorMenuFilter(MixxxMainWindow* pWindow)
+            : QObject(pWindow),
+              m_pWindow(pWindow) {
+    }
+
+    bool eventFilter(QObject* pObj, QEvent* pEvent) override {
+        if (pEvent->type() != QEvent::MouseButtonPress) {
+            return false;
+        }
+        auto* pMouse = static_cast<QMouseEvent*>(pEvent);
+        if (pMouse->button() != Qt::RightButton || !pObj->isWidgetType()) {
+            return false;
+        }
+        const QPoint inWindow = m_pWindow->mapFromGlobal(pMouse->globalPosition().toPoint());
+        if (inWindow.y() < 0 || inWindow.y() > 60) {
+            return false;
+        }
+        QMenu menu(m_pWindow);
+        menu.setStyleSheet(QStringLiteral(
+                "QMenu { background-color: #0e0e0e; border: 1px solid #3a3a3a; color: #e5e6ea;"
+                "  font-size: 16px; }"
+                "QMenu::item { padding: 10px 28px; }"
+                "QMenu::item:selected { background-color: #3478f2; color: #fff; }"));
+        menu.addAction(QObject::tr("File manager"), [] {
+            startDetachedAny({QStringLiteral("/usr/bin/pcmanfm"), QStringLiteral("pcmanfm")});
+        });
+        menu.addAction(QObject::tr("Terminal"), [] {
+            startDetachedAny({QStringLiteral("/usr/bin/lxterminal"),
+                    QStringLiteral("/usr/bin/x-terminal-emulator")});
+        });
+        menu.addSeparator();
+        menu.addAction(QObject::tr("Restart app"), [this] {
+            ControlObject::set(ConfigKey(QStringLiteral("[App]"), QStringLiteral("restart")), 1.0);
+            ControlObject::set(ConfigKey(QStringLiteral("[App]"), QStringLiteral("restart")), 0.0);
+        });
+        menu.addAction(QObject::tr("Quit app"), [] {
+            ControlObject::set(ConfigKey(QStringLiteral("[App]"), QStringLiteral("quit")), 1.0);
+        });
+        menu.exec(pMouse->globalPosition().toPoint());
+        return true;
+    }
+
+  private:
+    MixxxMainWindow* m_pWindow;
+};
 } // namespace
 
 MixxxMainWindow::MixxxMainWindow(std::shared_ptr<mixxx::CoreServices> pCoreServices)
@@ -359,11 +422,22 @@ void MixxxMainWindow::initialize() {
             &ControlPushButton::valueChanged,
             this,
             [this](double value) {
+                // Press starts a 5 s hold timer: holding that long quits the app for good (the
+                // Quit button is gone, and the desktop's Start icon brings it back); a normal
+                // tap restarts when the finger lifts.
                 if (value > 0.0) {
+                    m_restartHoldTimer.start();
+                } else if (m_restartHoldTimer.isActive()) {
+                    m_restartHoldTimer.stop();
                     m_restartRequested = true;
                     quitWithoutPrompt();
                 }
             });
+    m_restartHoldTimer.setSingleShot(true);
+    m_restartHoldTimer.setInterval(5000);
+    connect(&m_restartHoldTimer, &QTimer::timeout, this, [this]() {
+        quitWithoutPrompt();
+    });
     // [App],quit: quit now. Same reasoning as restart: the buttons are deliberate, and on the
     // Pi's fullscreen kiosk the "a deck is playing" question can end up behind the window, so
     // the button looked dead.
@@ -411,6 +485,13 @@ void MixxxMainWindow::initialize() {
             }
         }
     });
+
+    // Appliance backdoor (the Pi's supervisor sets MIXXX_BACKDOOR): a right click on the top bar
+    // opens a small menu with a file manager, a terminal, restart and quit. A touch screen only
+    // produces left clicks, so this is reachable with a mouse only.
+    if (qEnvironmentVariableIsSet("MIXXX_BACKDOOR")) {
+        qApp->installEventFilter(new BackdoorMenuFilter(this));
+    }
 
     // Tapping a deck's eject button while it plays does nothing (Mixxx ignores eject then, and
     // the skin dims the button). Say why, beside the finger.

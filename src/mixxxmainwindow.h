@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <QString>
+#include <QTimer>
 #include <memory>
 
 #include "preferences/constants.h"
@@ -165,6 +166,8 @@ class MixxxMainWindow : public QMainWindow {
     // detects at startup.
     std::unique_ptr<ControlPushButton> m_pRestartApp;
     bool m_restartRequested = false;
+    // Holding RESTART APP 5 s quits instead (see the [App],restart handler).
+    QTimer m_restartHoldTimer;
     // [ChannelN],eject proxies: warn when eject is tapped while the deck plays.
     std::vector<std::unique_ptr<ControlProxy>> m_ejectProxies;
     // [App],quit: quit without asking.
