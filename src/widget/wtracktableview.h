@@ -124,6 +124,8 @@ class WTrackTableView : public WLibraryTableView {
                                     DESIGNABLE true);
 
   signals:
+    /// A recording file was deleted: the list of recordings needs reading again.
+    void recordingFilesChanged();
     void trackMenuVisible(bool visible);
     void focusBorderColorChanged(QColor col);
     void trackPlayedColorChanged(QColor col);
@@ -166,6 +168,7 @@ class WTrackTableView : public WLibraryTableView {
     // loads to the first free deck) can cancel it; showLoadPopup() opens it.
     void slotRowClicked(const QModelIndex& index);
     void showLoadPopup();
+    void showRecordingPopup();
     bool isLoadBlockedByPlayingDeck(const QString& group) const;
 
   protected:
@@ -228,4 +231,5 @@ class WTrackTableView : public WLibraryTableView {
     int m_dropRow;
 
     QTimer m_loadPopupTimer;
+    bool m_recordingCopyRunning = false;
 };

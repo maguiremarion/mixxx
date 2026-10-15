@@ -178,6 +178,14 @@ class TrackModel {
     virtual int defaultFlexibleColumn() const {
         return -1;
     }
+    /// True for the list of the device's own recordings (Browse > Recordings): a tap on a row then
+    /// offers to copy the file to a plugged-in drive or delete it, instead of "Load 1 / Load 2".
+    virtual bool isRecordingList() const {
+        return false;
+    }
+    const QString& settingsNamespace() const {
+        return m_settingsNamespace;
+    }
     virtual const QList<int>& searchColumns() const { return m_emptyColumns; }
 
     virtual void removeTracks(const QModelIndexList& indices) {

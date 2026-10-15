@@ -713,11 +713,20 @@ void CoreServices::initialize(QApplication* pApp) {
         // resolves to) and a user hitting 'cancel'. If we get a blank return
         // but the user didn't hit cancel, we need to know this and let the
         // user take some course of action -- bkgood
-        QString fd = QFileDialog::getExistingDirectory(nullptr,
-                tr("Choose music library directory"),
-                QStandardPaths::writableLocation(
-                        QStandardPaths::MusicLocation),
-                QFileDialog::ShowDirsOnly);
+        QString fd;
+        if (DlgPreferences::kioskMode()) {
+            // An embedded machine does not ask: its music is on the drives that get plugged in
+            // (the Rekordbox / Serato features and the volume watcher deal with those), and the
+            // library folder is simply ~/Music, made if it is not there.
+            fd = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+            QDir(fd).mkpath(QStringLiteral("."));
+        } else {
+            fd = QFileDialog::getExistingDirectory(nullptr,
+                    tr("Choose music library directory"),
+                    QStandardPaths::writableLocation(
+                            QStandardPaths::MusicLocation),
+                    QFileDialog::ShowDirsOnly);
+        }
 #endif
         // request to add directory to database.
         if (!fd.isEmpty() && m_pLibrary->requestAddDir(fd)) {

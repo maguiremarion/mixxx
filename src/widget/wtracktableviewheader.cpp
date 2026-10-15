@@ -313,6 +313,10 @@ void WTrackTableViewHeader::restoreHeaderState() {
     if (layoutOutdated) {
         loadDefaultHeaderState();
         pTrackModel->setModelSetting("header_layout_version", QString::number(layoutVersion));
+        // Save it now: the version is recorded as done, and the layout used to be saved only when
+        // the program closed. If it was stopped before that (a restart from a script, a power
+        // cut), the next start found the new version with an older saved layout and showed that.
+        saveHeaderState();
     } else if (headerStateString.isEmpty()) {
         loadDefaultHeaderState();
     } else {

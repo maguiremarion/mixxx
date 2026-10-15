@@ -1,6 +1,20 @@
 #include "widget/wtracktableview.h"
 
+#ifdef Q_OS_UNIX
+#include <unistd.h>
+#endif
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QLabel>
+#include <QStorageInfo>
+#include <QStyle>
+#include <QThread>
+#include <QVBoxLayout>
+#include <memory>
 #include <QApplication>
+#include <QDateTime>
 #include <QCursor>
 #include <QDrag>
 #include <QFrame>
@@ -23,6 +37,7 @@
 #include "library/searchqueryparser.h"
 #include "library/trackcollection.h"
 #include "library/trackcollectionmanager.h"
+#include "mixer/playerinfo.h"
 #include "mixer/playermanager.h"
 #include "moc_wtracktableview.cpp"
 #include "preferences/colorpalettesettings.h"
@@ -35,6 +50,7 @@
 #include "util/defs.h"
 #include "util/dnd.h"
 #include "util/time.h"
+#include "widget/wnotice.h"
 #include "widget/wtrackmenu.h"
 #include "widget/wtracktableviewheader.h"
 
@@ -492,6 +508,10 @@ void WTrackTableView::showLoadPopup() {
     if (!isVisible() || getSelectedRows().isEmpty()) {
         return;
     }
+    if (auto* pModel = getTrackModel(); pModel && pModel->isRecordingList()) {
+        showRecordingPopup(); // recordings are copied off or deleted, not loaded
+        return;
+    }
     // Qt::Popup: closes itself when you click anywhere outside it.
     auto* pPopup = new QFrame(this, Qt::Popup);
     pPopup->setObjectName(QStringLiteral("LoadPopup"));
@@ -554,6 +574,222 @@ void WTrackTableView::showLoadPopup() {
     pPopup->show();
 }
 
+namespace {
+
+struct RecordingDrive {
+    QString label;
+    QString root;
+};
+
+// The plugged-in drives a recording can be copied to: removable, mounted under the usual mount
+// points, writable. (Not the system disk, not the SD card the program runs from.)
+QList<RecordingDrive> recordingDrives() {
+    QList<RecordingDrive> drives;
+    for (const QStorageInfo& info : QStorageInfo::mountedVolumes()) {
+        const QString root = info.rootPath();
+        if (!info.isValid() || !info.isReady() || info.isReadOnly() || root == QStringLiteral("/")) {
+            continue;
+        }
+        if (!(root.startsWith(QStringLiteral("/Volumes/")) ||
+                    root.startsWith(QStringLiteral("/media/")) ||
+                    root.startsWith(QStringLiteral("/run/media/")) ||
+                    root.startsWith(QStringLiteral("/mnt/")))) {
+            continue;
+        }
+        QString label = info.displayName();
+        if (label.isEmpty()) {
+            label = QFileInfo(root).fileName();
+        }
+        drives.append({label, root});
+    }
+    return drives;
+}
+
+struct RecordingCopyResult {
+    bool ok = false;
+    QString message;
+};
+
+// Copies `source` into <drive>/Recordings/. Done in a thread (a long recording takes a while on a
+// USB stick). The file arrives as "name.part" and is renamed when it is complete, so an unplugged
+// drive never leaves half a recording that looks like a whole one. A "Recordings" folder next to a
+// Rekordbox (PIONEER, Contents) or Serato (_Serato_) library is harmless: nothing there reads it.
+RecordingCopyResult copyRecordingToDrive(
+        const QString& source, const QString& driveRoot, const QString& driveLabel) {
+    RecordingCopyResult result;
+    const QFileInfo sourceInfo(source);
+    if (!sourceInfo.exists()) {
+        result.message = QObject::tr("This recording could not be found.");
+        return result;
+    }
+    const QStorageInfo drive(driveRoot);
+    const qint64 size = sourceInfo.size();
+    if (drive.bytesAvailable() < size + 64LL * 1024 * 1024) {
+        result.message = QObject::tr("There is not enough free space on the drive \"%1\".").arg(driveLabel);
+        return result;
+    }
+    const QString fileSystem = QString::fromLatin1(drive.fileSystemType()).toLower();
+    if ((fileSystem == QStringLiteral("vfat") || fileSystem == QStringLiteral("msdos")) &&
+            size >= 4LL * 1024 * 1024 * 1024) {
+        result.message = QObject::tr("This recording is too large for the drive \"%1\".\nFAT32 drives hold files up to 4 GB: use a drive formatted as exFAT.").arg(driveLabel);
+        return result;
+    }
+    QDir dir(driveRoot);
+    if (!dir.mkpath(QStringLiteral("Recordings"))) {
+        result.message = QObject::tr("Could not write to the drive \"%1\".").arg(driveLabel);
+        return result;
+    }
+    QString name = sourceInfo.fileName();
+    QString destination = dir.filePath(QStringLiteral("Recordings/") + name);
+    for (int n = 2; QFile::exists(destination); ++n) { // never overwrite
+        destination = dir.filePath(QStringLiteral("Recordings/") + sourceInfo.completeBaseName() +
+                QStringLiteral(" (%1).").arg(n) + sourceInfo.suffix());
+    }
+    const QString partial = destination + QStringLiteral(".part");
+    QFile::remove(partial);
+    if (!QFile::copy(source, partial)) {
+        QFile::remove(partial);
+        result.message = QObject::tr("The copy to \"%1\" did not finish.\nMake sure the drive is still plugged in, then try again.").arg(driveLabel);
+        return result;
+    }
+#ifdef Q_OS_UNIX
+    ::sync(); // on the drive before the message says it is done
+#endif
+    if (!QFile::rename(partial, destination)) {
+        QFile::remove(partial);
+        result.message = QObject::tr("The copy to \"%1\" did not finish.\nMake sure the drive is still plugged in, then try again.").arg(driveLabel);
+        return result;
+    }
+#ifdef Q_OS_UNIX
+    ::sync();
+#endif
+    result.ok = true;
+    return result;
+}
+
+} // namespace
+
+/// Tap on a row of Browse > Recordings: copy that recording to a plugged-in drive, or delete it.
+void WTrackTableView::showRecordingPopup() {
+    const QModelIndexList rows = getSelectedRows();
+    auto* pTrackModel = getTrackModel();
+    QWidget* pWindow = window();
+    if (rows.isEmpty() || !pTrackModel || !pWindow) {
+        return;
+    }
+    const QString path = pTrackModel->getTrackLocation(rows.first());
+    if (path.isEmpty()) {
+        return;
+    }
+    const QString fileName = QFileInfo(path).fileName();
+
+    auto* pPopup = new QFrame(this, Qt::Popup);
+    pPopup->setObjectName(QStringLiteral("LoadPopup"));
+    pPopup->setAttribute(Qt::WA_DeleteOnClose);
+    pPopup->setAttribute(Qt::WA_StyledBackground);
+    auto* pLayout = new QVBoxLayout(pPopup);
+    pLayout->setContentsMargins(0, 0, 0, 0);
+    pLayout->setSpacing(0);
+
+    auto addButton = [&](const QString& text) {
+        auto* pButton = new QPushButton(text, pPopup);
+        pButton->setObjectName(QStringLiteral("LoadPopupButton"));
+        pButton->setFocusPolicy(Qt::NoFocus);
+        pLayout->addWidget(pButton);
+        return pButton;
+    };
+    const QPoint noticeAnchor = mapTo(pWindow, QPoint(width() / 2, height() / 3));
+
+    const QList<RecordingDrive> drives = recordingDrives();
+    if (drives.isEmpty()) {
+        auto* pNote = new QLabel(tr("Plug in a USB drive to offload"), pPopup);
+        pNote->setObjectName(QStringLiteral("LoadPopupButton"));
+        pNote->setAlignment(Qt::AlignCenter);
+        pLayout->addWidget(pNote);
+    }
+    for (const RecordingDrive& drive : drives) {
+        QPushButton* pCopy = addButton(tr("Copy to %1").arg(drive.label));
+        connect(pCopy, &QPushButton::clicked, this, [this, pPopup, pWindow, path, drive, noticeAnchor]() {
+            pPopup->close();
+            if (m_recordingCopyRunning) {
+                WNotice::show(pWindow, tr("Another copy is still running.\nPlease wait for it to finish."), noticeAnchor, true);
+                return;
+            }
+            m_recordingCopyRunning = true;
+            auto result = std::make_shared<RecordingCopyResult>();
+            QThread* pThread = QThread::create([result, path, root = drive.root, label = drive.label]() {
+                *result = copyRecordingToDrive(path, root, label);
+            });
+            auto* pReminder = new QTimer(this);
+            const QString copying = tr("Copying to \"%1\"...\nDo not remove the drive until the copy has finished.").arg(drive.label);
+            WNotice::show(pWindow, copying, noticeAnchor, true);
+            pReminder->setInterval(3000);
+            connect(pReminder, &QTimer::timeout, this, [pWindow, copying, noticeAnchor]() {
+                WNotice::show(pWindow, copying, noticeAnchor, true);
+            });
+            pReminder->start();
+            connect(pThread, &QThread::finished, this, [this, pThread, pReminder, result, pWindow, drive, noticeAnchor]() {
+                pReminder->stop();
+                pReminder->deleteLater();
+                pThread->deleteLater();
+                m_recordingCopyRunning = false;
+                WNotice::show(pWindow,
+                        result->ok ? tr("Copied to drive \"%1\"\nunder /Recordings").arg(drive.label)
+                                   : result->message,
+                        noticeAnchor,
+                        true);
+            });
+            pThread->start();
+        });
+    }
+
+    // Delete asks again: the first tap changes the button, the second one deletes.
+    QPushButton* pDelete = addButton(tr("Delete"));
+    connect(pDelete, &QPushButton::clicked, this, [this, pPopup, pDelete, pWindow, path, pTrackModel, rows, noticeAnchor]() {
+        if (pDelete->property("armed").toBool()) {
+            pPopup->close();
+            const QFileInfo info(path);
+            TrackPointer pTrack = pTrackModel->getTrack(rows.first());
+            if (info.lastModified().secsTo(QDateTime::currentDateTime()) < 5) {
+                WNotice::show(pWindow, tr("This recording is still being made."), noticeAnchor, true);
+            } else if (pTrack && PlayerInfo::instance().isTrackLoaded(pTrack)) {
+                WNotice::show(pWindow, tr("This recording is loaded in a deck.\nEject it first to delete it."), noticeAnchor, true);
+            } else if (QFile::remove(path)) {
+                WNotice::show(pWindow, tr("Recording deleted"), noticeAnchor, true);
+                emit recordingFilesChanged();
+            } else {
+                WNotice::show(pWindow, tr("Could not delete this recording."), noticeAnchor, true);
+            }
+            return;
+        }
+        pDelete->setProperty("armed", true);
+        pDelete->style()->unpolish(pDelete);
+        pDelete->style()->polish(pDelete);
+        pDelete->setText(tr("Tap again to delete"));
+        QPointer<QPushButton> pGuard(pDelete);
+        QTimer::singleShot(3000, pDelete, [pGuard]() {
+            if (pGuard) {
+                pGuard->setProperty("armed", false);
+                pGuard->style()->unpolish(pGuard);
+                pGuard->style()->polish(pGuard);
+                pGuard->setText(tr("Delete"));
+            }
+        });
+        pPopup->adjustSize();
+    });
+    Q_UNUSED(fileName);
+
+    pPopup->adjustSize();
+    QPoint pos = QCursor::pos();
+    if (const QScreen* pScreen = screen()) {
+        const QRect avail = pScreen->availableGeometry();
+        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
+    }
+    pPopup->move(pos);
+    pPopup->show();
+}
+
 // slot
 void WTrackTableView::slotMouseDoubleClicked(const QModelIndex& index) {
     // A double-click loads straight to a deck, so no popup for it.
@@ -575,6 +811,9 @@ void WTrackTableView::slotMouseDoubleClicked(const QModelIndex& index) {
     auto* pTrackModel = getTrackModel();
     VERIFY_OR_DEBUG_ASSERT(pTrackModel) {
         return;
+    }
+    if (pTrackModel->isRecordingList()) {
+        return; // recordings are copied off or deleted (the single-tap popup), never loaded
     }
 
     if (doubleClickAction == DlgPrefLibrary::TrackDoubleClickAction::LoadToDeck &&

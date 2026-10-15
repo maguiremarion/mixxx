@@ -113,6 +113,22 @@ bool ProxyTrackModel::isColumnInternal(int column) {
     return m_pTrackModel ? m_pTrackModel->isColumnInternal(column) : false;
 }
 
+bool ProxyTrackModel::isRecordingList() const {
+    return m_pTrackModel->isRecordingList();
+}
+
+QList<QPair<int, int>> ProxyTrackModel::defaultColumnLayout() const {
+    return m_pTrackModel->defaultColumnLayout();
+}
+
+int ProxyTrackModel::defaultColumnLayoutVersion() const {
+    return m_pTrackModel->defaultColumnLayoutVersion();
+}
+
+int ProxyTrackModel::defaultFlexibleColumn() const {
+    return m_pTrackModel->defaultFlexibleColumn();
+}
+
 bool ProxyTrackModel::isColumnHiddenByDefault(int column) {
     return m_pTrackModel ? m_pTrackModel->isColumnHiddenByDefault(column) : false;
 }

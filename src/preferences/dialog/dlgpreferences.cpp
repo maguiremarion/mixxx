@@ -8,6 +8,8 @@
 #include <QResizeEvent>
 #include <QHBoxLayout>
 #include <QPainter>
+#include <QLabel>
+#include <QRegularExpression>
 #include <QScreen>
 #include <QTimer>
 #include <QScrollArea>
@@ -122,6 +124,21 @@ DlgPreferences::DlgPreferences(
     addPageWidget(m_soundPage,
             kioskMode() ? tr("Sound") : tr("Sound Hardware"),
             "ic_preferences_soundhardware.svg");
+    if (kioskMode()) {
+        // Output, Input and Settings are entries of their own under "Sound", like a controller's
+        // page is under "Controllers".
+        auto makeSoundItem = [this](const QString& title) {
+            auto* pItem = new QTreeWidgetItem(m_soundPage.pTreeItem, QTreeWidgetItem::Type);
+            pItem->setText(0, title);
+            pItem->setTextAlignment(0, Qt::AlignLeft | Qt::AlignVCenter);
+            pItem->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+            return pItem;
+        };
+        m_pSoundOutputItem = makeSoundItem(tr("Output"));
+        m_pSoundInputItem = makeSoundItem(tr("Input"));
+        m_pSoundSettingsItem = makeSoundItem(tr("Settings"));
+        contentsTreeWidget->expandItem(m_soundPage.pTreeItem);
+    }
 
     DlgPrefLibrary* plibraryPage = new DlgPrefLibrary(this, m_pConfig, pLibrary);
     connect(plibraryPage,
@@ -316,6 +333,10 @@ void DlgPreferences::changePage(QTreeWidgetItem* pCurrent, QTreeWidgetItem* pPre
         pCurrent = pPrevious;
     }
 
+    if (handleSoundTreeItem(pCurrent)) {
+        return;
+    }
+
     if (m_pControllersDlg->handleTreeItemClick(pCurrent)) {
         // Do nothing. m_controllersPage handled this click.
         return;
@@ -329,8 +350,42 @@ void DlgPreferences::changePage(QTreeWidgetItem* pCurrent, QTreeWidgetItem* pPre
     }
 }
 
+/// The kiosk's Sound entries: the heading opens (and shows its first entry), each entry shows one part
+/// of the Sound page.
+bool DlgPreferences::handleSoundTreeItem(QTreeWidgetItem* pItem) {
+    if (!m_pSoundOutputItem || !pItem) {
+        return false;
+    }
+    if (pItem == m_soundPage.pTreeItem) {
+        contentsTreeWidget->expandItem(pItem);
+        contentsTreeWidget->setCurrentItem(m_pSoundOutputItem);
+        return true;
+    }
+    DlgPrefSound::Section section;
+    if (pItem == m_pSoundOutputItem) {
+        section = DlgPrefSound::Section::Output;
+    } else if (pItem == m_pSoundInputItem) {
+        section = DlgPrefSound::Section::Input;
+    } else if (pItem == m_pSoundSettingsItem) {
+        section = DlgPrefSound::Section::Settings;
+    } else {
+        return false;
+    }
+    m_pSoundDlg->showSection(section);
+    switchToPage(pItem->text(0), m_soundPage.pDlg);
+    return true;
+}
+
 void DlgPreferences::showSoundHardwarePage(
         std::optional<mixxx::preferences::SoundHardwareTab> tab) {
+    if (m_pSoundOutputItem) {
+        contentsTreeWidget->expandItem(m_soundPage.pTreeItem);
+        const bool input = tab.has_value() && *tab == mixxx::preferences::SoundHardwareTab::Input;
+        contentsTreeWidget->setCurrentItem(input ? m_pSoundInputItem : m_pSoundOutputItem);
+        // (changePage() shows the section)
+        handleSoundTreeItem(input ? m_pSoundInputItem : m_pSoundOutputItem);
+        return;
+    }
     switchToPage(m_soundPage.pTreeItem->text(0), m_soundPage.pDlg);
     contentsTreeWidget->setCurrentItem(m_soundPage.pTreeItem);
     if (tab.has_value()) {
@@ -646,12 +701,29 @@ bool DlgPreferences::kioskMode() {
     return kioskPreferencesEnabled();
 }
 
+/// No links in the kiosk's Preferences: a tap on one would open a web page. Their text stays, as plain text.
+void DlgPreferences::stripLinks() {
+    static const QRegularExpression anchor(
+            QStringLiteral("<a\\b[^>]*>(.*?)</a>"), QRegularExpression::DotMatchesEverythingOption);
+    for (QLabel* pLabel : findChildren<QLabel*>()) {
+        pLabel->setOpenExternalLinks(false);
+        const QString text = pLabel->text();
+        if (text.contains(QStringLiteral("<a "))) {
+            pLabel->setText(QString(text).replace(anchor, QStringLiteral("\\1")));
+        }
+        if (pLabel->textInteractionFlags().testFlag(Qt::LinksAccessibleByMouse)) {
+            pLabel->setTextInteractionFlags(Qt::NoTextInteraction);
+        }
+    }
+}
+
 void DlgPreferences::setVisible(bool visible) {
     const bool kiosk = visible && kioskPreferencesEnabled();
     if (kiosk && !isFullScreen()) {
         setWindowState(windowState() | Qt::WindowFullScreen);
     }
     if (kiosk) {
+        stripLinks();
         // A wider page list: "Controllers > DDJ-FLX2 ..." and "Sound Hardware" were cut off.
         constexpr int kKioskPageListWidth = 220;
         contentsTreeWidget->setMinimumWidth(kKioskPageListWidth);
@@ -677,10 +749,11 @@ namespace {
 /// The pages kept in the kiosk list: Sound Hardware, Controllers (and each controller's page)
 /// and Interface.
 bool isKioskPreferencesPage(const QWidget* pPage) {
+    // (Interface, with the skin choice, language and scaling, is left out: nobody changes the skin
+    // of an embedded machine. MIXXX_ALL_PREFS=1 brings every page back.)
     return qobject_cast<const DlgPrefSound*>(pPage) ||
             qobject_cast<const DlgPrefControllers*>(pPage) ||
-            qobject_cast<const DlgPrefController*>(pPage) ||
-            qobject_cast<const DlgPrefInterface*>(pPage);
+            qobject_cast<const DlgPrefController*>(pPage);
 }
 
 } // namespace
@@ -719,6 +792,10 @@ void DlgPreferences::addPageWidget(const PreferencesPage& page,
     // Add a new scroll area to the stacked pages widget containing the page
     QScrollArea* sa = new QScrollArea(pagesWidget);
     sa->setWidgetResizable(true);
+    if (kioskMode()) {
+        // a page is never wider than the screen: it scrolls up and down only
+        sa->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    }
 
     sa->setWidget(pageCopy.pDlg);
     pagesWidget->addWidget(sa);

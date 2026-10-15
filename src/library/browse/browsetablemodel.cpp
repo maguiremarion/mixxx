@@ -391,6 +391,36 @@ TrackModel::Capabilities BrowseTableModel::getCapabilities() const {
             Capability::Sorting;
 }
 
+bool BrowseTableModel::isRecordingList() const {
+    return settingsNamespace() == QStringLiteral("mixxx.db.model.recording");
+}
+
+QList<QPair<int, int>> BrowseTableModel::defaultColumnLayout() const {
+    if (!isRecordingList()) {
+        return {};
+    }
+    // File name (the long one), duration, when it was recorded, and the file type. The browse table
+    // is 766 px wide on a 1024 px screen (1024 - sidebar 230 - scrollbar 28); these add up to 764
+    // so they fill it and it never scrolls sideways. Everything else is hidden (the header's
+    // right-click menu brings it back).
+    return {
+            {COLUMN_FILENAME, 360},
+            {COLUMN_DURATION, 90},
+            {COLUMN_FILE_MODIFIED_TIME, 210},
+            {COLUMN_TYPE, 104},
+    };
+}
+
+int BrowseTableModel::defaultColumnLayoutVersion() const {
+    // 2: the layout is saved when it is applied (version 1 could be recorded with an older saved layout)
+    return isRecordingList() ? 2 : 0;
+}
+
+int BrowseTableModel::defaultFlexibleColumn() const {
+    // Duration: its title is longer than its values
+    return isRecordingList() ? COLUMN_DURATION : -1;
+}
+
 QString BrowseTableModel::modelKey(bool noSearch) const {
     // Searching is handled by the proxy model, so if there is an active search
     // modelkey is composed there, too.

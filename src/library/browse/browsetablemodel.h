@@ -71,6 +71,13 @@ class BrowseTableModel final : public QStandardItemModel, public virtual TrackMo
     TrackPointer getTrackByRef(const TrackRef& trackRef) const override;
     TrackModel::Capabilities getCapabilities() const override;
 
+    // Browse > Recordings (the same model as Computer, with its own settings namespace): a plain list
+    // of file name, duration, modified time and type, sized to fill the browse area.
+    bool isRecordingList() const override;
+    QList<QPair<int, int>> defaultColumnLayout() const override;
+    int defaultColumnLayoutVersion() const override;
+    int defaultFlexibleColumn() const override;
+
     QString getTrackLocation(const QModelIndex& index) const override;
     TrackId getTrackId(const QModelIndex& index) const override;
     QUrl getTrackUrl(const QModelIndex& index) const final;

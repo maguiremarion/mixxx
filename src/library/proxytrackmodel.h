@@ -37,6 +37,11 @@ class ProxyTrackModel : public QSortFilterProxyModel, public TrackModel {
     const QString currentSearch() const final;
     bool isColumnInternal(int column) final;
     bool isColumnHiddenByDefault(int column) final;
+    // (the proxy adds no columns, so the wrapped model's default layout is the proxy's)
+    bool isRecordingList() const override;
+    QList<QPair<int, int>> defaultColumnLayout() const override;
+    int defaultColumnLayoutVersion() const override;
+    int defaultFlexibleColumn() const override;
     void removeTracks(const QModelIndexList& indices) final;
     void copyTracks(const QModelIndexList& indices) const final;
     void moveTrack(const QModelIndex& sourceIndex, const QModelIndex& destIndex) final;

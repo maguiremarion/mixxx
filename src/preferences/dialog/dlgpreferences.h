@@ -122,6 +122,12 @@ class DlgPreferences : public QDialog, public Ui::DlgPreferencesDlg {
     UserSettingsPointer m_pConfig;
     std::unique_ptr<DlgPrefSound> m_pSoundDlg;
     PreferencesPage m_soundPage;
+    // kiosk: Sound is a heading with three entries under it, each showing one part of the page
+    QTreeWidgetItem* m_pSoundOutputItem = nullptr;
+    QTreeWidgetItem* m_pSoundInputItem = nullptr;
+    QTreeWidgetItem* m_pSoundSettingsItem = nullptr;
+    bool handleSoundTreeItem(QTreeWidgetItem* pItem);
+    void stripLinks();
     DlgPrefControllers* m_pControllersDlg;
 
     QSize m_pageSizeHint;

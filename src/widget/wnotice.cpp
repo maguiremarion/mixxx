@@ -18,7 +18,7 @@ void show(QWidget* pWindow, const QString& text, const QPoint& anchor, bool cent
     if (!s_pLabel || s_pLabel->parentWidget() != pWindow) {
         delete s_pLabel;
         s_pLabel = new QLabel(pWindow);
-        s_pLabel->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        s_pLabel->setAlignment(Qt::AlignCenter);
         s_pLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
         s_pLabel->setWordWrap(true);
         s_pLabel->setStyleSheet(QStringLiteral(
@@ -39,7 +39,7 @@ void show(QWidget* pWindow, const QString& text, const QPoint& anchor, bool cent
     }
     const int chrome = 2 * 14 + 2 * 1 + 20; // left/right padding + border + slack (the text is
                                             // a little wider than the plain metrics say)
-    s_pLabel->setFixedWidth(std::min(std::min(380, pWindow->width() / 2), textWidth + chrome));
+    s_pLabel->setFixedWidth(std::min(std::min(440, pWindow->width() * 2 / 3), textWidth + chrome));
     s_pLabel->adjustSize();
     QPoint pos = anchor;
     if (centered) {

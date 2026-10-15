@@ -1,5 +1,8 @@
 #pragma once
 
+#include <QLabel>
+#include <QList>
+#include <QSet>
 #include <memory>
 
 #include "control/pollingcontrolproxy.h"
@@ -32,6 +35,11 @@ class DlgPrefSound : public DlgPreferencePage, public Ui::DlgPrefSoundDlg  {
             UserSettingsPointer pSettings);
 
     void selectIOTab(mixxx::preferences::SoundHardwareTab tab);
+
+    /// The kiosk shows this page as three: Output, Input and Settings (the sub-entries under
+    /// "Sound" in the page list). Each shows its part of the page and a sentence about it.
+    enum class Section { Output, Input, Settings };
+    void showSection(Section section);
 
     QUrl helpUrl() const override;
     bool okayToClose() const override;
@@ -100,6 +108,12 @@ class DlgPrefSound : public DlgPreferencePage, public Ui::DlgPrefSoundDlg  {
     void loadSettings(const SoundManagerConfig &config);
     void insertItem(DlgPrefSoundItem *pItem, QVBoxLayout *pLayout);
     void checkLatencyCompensation();
+
+    // kiosk sections
+    QList<QWidget*> m_settingsWidgets;
+    QSet<QWidget*> m_hiddenBySection;
+    QLabel* m_pIntro = nullptr;
+    void setSectionVisible(QWidget* pWidget, bool visible);
 
     std::shared_ptr<SoundManager> m_pSoundManager;
     UserSettingsPointer m_pSettings;

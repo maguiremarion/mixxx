@@ -2,6 +2,9 @@
 #include "preferences/dialog/dlgpreferences.h"
 
 #include <QBoxLayout>
+#include <QComboBox>
+#include <QLayout>
+#include <QTabBar>
 #include <QCheckBox>
 #include <QFrame>
 #include <QGroupBox>
@@ -123,15 +126,15 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
         pCard->setObjectName(QStringLiteral("PrefCard"));
         auto* pCardLayout = new QVBoxLayout(pCard);
         pCardLayout->setContentsMargins(20, 16, 20, 16);
-        auto* pIntro = new QLabel(tr(
-                "Choose where the sound goes. On Output, pick the device for the main speakers "
-                "and for your headphones. On Input, pick the device for a microphone or another "
-                "source. A smaller audio buffer means less delay, but the sound can crackle if "
-                "the system is busy."),
-                pCard);
-        pIntro->setWordWrap(true);
-        pIntro->setObjectName(QStringLiteral("PageText"));
-        pCardLayout->addWidget(pIntro);
+        m_pIntro = new QLabel(QString(), pCard);
+        m_pIntro->setWordWrap(true);
+        m_pIntro->setObjectName(QStringLiteral("PageText"));
+        pCardLayout->addWidget(m_pIntro);
+        // The longest device name must not make the page wider than the screen.
+        for (QComboBox* pCombo : findChildren<QComboBox*>()) {
+            pCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            pCombo->setMinimumContentsLength(16);
+        }
         verticalLayout_2->insertWidget(0, pCard);
     }
     // Create text color for the wiki links
@@ -655,6 +658,66 @@ void DlgPrefSound::slotApply() {
 
 QUrl DlgPrefSound::helpUrl() const {
     return QUrl(MIXXX_MANUAL_SOUND_URL);
+}
+
+namespace {
+void collectWidgets(QLayout* pLayout, QList<QWidget*>* pWidgets) {
+    for (int i = 0; i < pLayout->count(); ++i) {
+        QLayoutItem* pItem = pLayout->itemAt(i);
+        if (QWidget* pWidget = pItem->widget()) {
+            pWidgets->append(pWidget);
+        } else if (QLayout* pChild = pItem->layout()) {
+            collectWidgets(pChild, pWidgets);
+        }
+    }
+}
+} // namespace
+
+void DlgPrefSound::setSectionVisible(QWidget* pWidget, bool visible) {
+    // Only what this function hid is shown again: widgets the page itself keeps hidden (options that
+    // don't apply to the chosen sound API) stay hidden.
+    if (visible) {
+        if (m_hiddenBySection.remove(pWidget)) {
+            pWidget->show();
+        }
+    } else if (!pWidget->isHidden()) {
+        pWidget->hide();
+        m_hiddenBySection.insert(pWidget);
+    }
+}
+
+void DlgPrefSound::showSection(Section section) {
+    if (!m_pIntro) {
+        return; // not the kiosk
+    }
+    if (m_settingsWidgets.isEmpty()) {
+        collectWidgets(gridLayout, &m_settingsWidgets);
+        collectWidgets(buttonsHLayout, &m_settingsWidgets);
+        m_settingsWidgets.append(line_2);
+        m_settingsWidgets.append(Hints);
+        ioTabs->tabBar()->hide(); // the sections are the tabs now
+    }
+    const bool settings = section == Section::Settings;
+    if (!settings) {
+        ioTabs->setCurrentWidget(section == Section::Output ? outputTab : inputTab);
+    }
+    setSectionVisible(ioTabs, !settings);
+    for (QWidget* pWidget : std::as_const(m_settingsWidgets)) {
+        setSectionVisible(pWidget, settings);
+    }
+    switch (section) {
+    case Section::Output:
+        m_pIntro->setText(tr("Choose the audio device for the main speakers and the one for "
+                             "your headphones."));
+        break;
+    case Section::Input:
+        m_pIntro->setText(tr("Choose the audio device for a microphone or another source."));
+        break;
+    case Section::Settings:
+        m_pIntro->setText(tr("The audio quality and delay. A smaller audio buffer means less "
+                             "delay, but the sound can crackle if the system is busy."));
+        break;
+    }
 }
 
 void DlgPrefSound::selectIOTab(mixxx::preferences::SoundHardwareTab tab) {

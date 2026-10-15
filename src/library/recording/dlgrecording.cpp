@@ -3,6 +3,7 @@
 #include "controllers/keyboard/keyboardeventfilter.h"
 #include "library/library.h"
 #include "moc_dlgrecording.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "recording/recordingmanager.h"
 #include "util/assert.h"
 #include "widget/wlibrary.h"
@@ -90,6 +91,16 @@ DlgRecording::DlgRecording(
             this,
             &DlgRecording::slotRecButtonClicked);
 
+    // The REC button in the top bar starts and stops recording: this page only lists the files (and
+    // the table's tap offers to copy a file to a drive or delete it).
+    if (DlgPreferences::kioskMode()) {
+        pushButtonRecording->hide();
+    }
+    connect(m_pTrackTableView,
+            &WTrackTableView::recordingFilesChanged,
+            this,
+            &DlgRecording::refreshBrowseModel);
+
     labelRecPrefix->hide();
     labelRecFilename->hide();
     labelRecStatistics->hide();
@@ -147,6 +158,11 @@ void DlgRecording::slotRecordingStateChanged(bool isRecording) {
         labelRecPrefix->hide();
         labelRecFilename->hide();
         labelRecStatistics->hide();
+    }
+    // The kiosk has no start button here: the row above the table is only there to show what is
+    // being recorded, so it takes no room (a black strip over the table) when nothing is.
+    if (DlgPreferences::kioskMode()) {
+        LibraryFeatureControls->setVisible(isRecording);
     }
     //This will update the recorded track table view
     refreshBrowseModel();
