@@ -2,6 +2,7 @@
 #include "preferences/dialog/dlgpreferences.h"
 
 #include <QBoxLayout>
+#include <QHBoxLayout>
 #include <QComboBox>
 #include <QLayout>
 #include <QTabBar>
@@ -129,7 +130,22 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
         m_pIntro = new QLabel(QString(), pCard);
         m_pIntro->setWordWrap(true);
         m_pIntro->setObjectName(QStringLiteral("PageText"));
-        pCardLayout->addWidget(m_pIntro);
+        // The refresh button sits with the sentence at the top of every Sound page (it was a button
+        // "Query Devices" below the lists, on the Settings part only).
+        auto* pCardRow = new QHBoxLayout();
+        pCardRow->setSpacing(16);
+        pCardRow->addWidget(m_pIntro, 1);
+        buttonsHLayout->removeWidget(queryButton);
+        queryButton->setParent(pCard);
+        queryButton->setText(tr("Refresh Devices"));
+        queryButton->setToolTip(tr("Look for audio devices that were plugged in or removed"));
+        pCardRow->addWidget(queryButton, 0, Qt::AlignVCenter);
+        pCardLayout->addLayout(pCardRow);
+        // The lists are only as tall as their rows: no stretching pane under them
+        outputVSpacer->changeSize(0, 0, QSizePolicy::Minimum, QSizePolicy::Minimum);
+        inputVSpacer->changeSize(0, 0, QSizePolicy::Minimum, QSizePolicy::Minimum);
+        ioTabs->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+        verticalLayout_2->addStretch(1);
         // The longest device name must not make the page wider than the screen.
         for (QComboBox* pCombo : findChildren<QComboBox*>()) {
             pCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
