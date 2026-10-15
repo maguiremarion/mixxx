@@ -74,6 +74,10 @@ class Library: public QObject {
     /// Look for Rekordbox drives and read them in the background (e.g. after a USB stick was
     /// plugged in), without changing what is shown.
     void preloadRekordboxDevices();
+
+    /// Everything that lists drives, read again: Rekordbox / Serato exports and the Computer
+    /// entry's Removable Devices.
+    void refreshDrives();
     void bindLibraryWidget(WLibrary* libraryWidget,
                     KeyboardEventFilter* pKeyboard);
 

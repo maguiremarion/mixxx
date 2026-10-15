@@ -183,6 +183,7 @@ class MixxxMainWindow : public QMainWindow {
     // [App],rescan_library / [App],library_scan_active: Library > Rescan Library
     // (Ctrl+Shift+L) as controls for skins and controllers.
     std::unique_ptr<ControlPushButton> m_pRescanLibrary;
+    std::unique_ptr<ControlPushButton> m_pRefreshDrives;
     std::unique_ptr<ControlObject> m_pLibraryScanActive;
     // Rescan the library when an external volume is mounted or removed.
     // [App],auto_rescan_on_volume_change (persistent toggle, default on) switches it off.

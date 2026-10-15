@@ -81,6 +81,7 @@ public:
 
 public slots:
   void slotRateRangeChanged(double);
+  void updateRateRangeTier(double range);
   // [ChannelN],rate_range_cycle: step the tempo fader range through a short
   // list (6, 10, 16, 50 %) and wrap around.
   void slotRateRangeCycle(double);
@@ -119,6 +120,10 @@ private:
   std::unique_ptr<ControlObject> m_pRateDir;
   std::unique_ptr<ControlObject> m_pRateRange;
   std::unique_ptr<ControlPushButton> m_pRateRangeCycle;
+  // [ChannelN],rate_range_tier: which preset rateRange is: 1 = 6 %, 2 = 8, 3 = 10, 4 = 16, 5 = 50
+  // (read as WIDE), 0 = any other value. The skin shows its range button from it (a skin
+  // connection sees the normalised 0..1 value of rateRange, so it cannot compare to 0.06).
+  std::unique_ptr<ControlObject> m_pRateRangeTier;
   std::unique_ptr<ControlPotmeter> m_pRateSlider;
   std::unique_ptr<ControlPotmeter> m_pRateSearch;
 

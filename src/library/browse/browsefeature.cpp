@@ -416,6 +416,17 @@ std::vector<std::unique_ptr<TreeItem>> createRemovableDevices() {
 }
 } // namespace
 
+void BrowseFeature::refreshDevices() {
+    for (int row = 0; row < m_pSidebarModel->rowCount(); ++row) {
+        const QModelIndex idx = m_pSidebarModel->index(row, 0);
+        const auto* pItem = static_cast<const TreeItem*>(idx.internalPointer());
+        if (pItem && pItem->getData().toString() == QStringLiteral(DEVICE_NODE)) {
+            onLazyChildExpandation(idx);
+            return;
+        }
+    }
+}
+
 // This is called whenever you double click or use the triangle symbol to expand
 // the subtree. The method will read the subfolders.
 void BrowseFeature::onLazyChildExpandation(const QModelIndex& index) {

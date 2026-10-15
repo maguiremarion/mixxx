@@ -2,6 +2,8 @@
 
 #include <QtDebug>
 
+#include <cmath>
+
 #include "control/controlobject.h"
 #include "control/controlpotmeter.h"
 #include "control/controlproxy.h"
@@ -141,6 +143,15 @@ RateControl::RateControl(const QString& group, UserSettingsPointer pConfig)
             this,
             &RateControl::slotRateRangeChanged,
             Qt::DirectConnection);
+
+    m_pRateRangeTier = std::make_unique<ControlObject>(
+            ConfigKey(group, QStringLiteral("rate_range_tier")));
+    connect(m_pRateRange.get(),
+            &ControlObject::valueChanged,
+            this,
+            &RateControl::updateRateRangeTier,
+            Qt::DirectConnection);
+    updateRateRangeTier(m_pRateRange->get()); // the starting value
 
     m_pRateRangeCycle = std::make_unique<ControlPushButton>(
             ConfigKey(group, QStringLiteral("rate_range_cycle")));
@@ -298,6 +309,17 @@ void RateControl::slotRateRangeChanged(double) {
     slotRateRatioChanged(m_pRateRatio->get());
 }
 
+void RateControl::updateRateRangeTier(double range) {
+    static constexpr double kPresets[] = {0.06, 0.08, 0.10, 0.16, 0.50};
+    double tier = 0.0;
+    for (int i = 0; i < 5; ++i) {
+        if (std::abs(range - kPresets[i]) < 1e-6) {
+            tier = i + 1;
+        }
+    }
+    m_pRateRangeTier->set(tier);
+}
+
 void RateControl::slotRateRangeCycle(double v) {
     if (v <= 0.0) {
         return; // button release
@@ -314,6 +336,8 @@ void RateControl::slotRateRangeCycle(double v) {
         }
     }
     m_pRateRange->set(next);
+    // set() does not signal the control object that made the change
+    updateRateRangeTier(next);
 }
 
 void RateControl::slotRateSliderChanged(double v) {

@@ -672,6 +672,13 @@ void Library::preloadRekordboxDevices() {
     }
 }
 
+void Library::refreshDrives() {
+    preloadRekordboxDevices();
+    if (m_pBrowseFeature.get()) {
+        m_pBrowseFeature->refreshDevices();
+    }
+}
+
 void Library::slotRefreshLibraryModels() {
     m_pMixxxLibraryFeature->refreshLibraryModels();
     m_pAnalysisFeature->refreshLibraryModels();

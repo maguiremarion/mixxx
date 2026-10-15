@@ -519,6 +519,16 @@ void MixxxMainWindow::initialize() {
             ConfigKey(QStringLiteral("[App]"), QStringLiteral("rescan_library")));
     m_pLibraryScanActive = std::make_unique<ControlObject>(
             ConfigKey(QStringLiteral("[App]"), QStringLiteral("library_scan_active")));
+    // [App],refresh_drives: the sidebar's REFRESH DRIVES button. Reads the drives again.
+    m_pRefreshDrives = std::make_unique<ControlPushButton>(
+            ConfigKey(QStringLiteral("[App]"), QStringLiteral("refresh_drives")));
+    connect(m_pRefreshDrives.get(), &ControlPushButton::valueChanged, this, [this](double value) {
+        if (value > 0.0) {
+            if (auto pLibrary = m_pCoreServices->getLibrary()) {
+                pLibrary->refreshDrives();
+            }
+        }
+    });
     if (auto pTrackCollectionManager = m_pCoreServices->getTrackCollectionManager()) {
         connect(m_pRescanLibrary.get(),
                 &ControlPushButton::valueChanged,
@@ -566,7 +576,7 @@ void MixxxMainWindow::initialize() {
                     // A drive came or went: (re)read any Rekordbox exports on it in the
                     // background, so its playlists are ready when it is tapped.
                     if (auto pLibrary = m_pCoreServices->getLibrary()) {
-                        pLibrary->preloadRekordboxDevices();
+                        pLibrary->refreshDrives();
                     }
                     if (m_pAutoRescanOnVolumeChange->get() <= 0.0) {
                         return;

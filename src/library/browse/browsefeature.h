@@ -39,6 +39,9 @@ class BrowseFeature : public LibraryFeature {
 
     void releaseBrowseThread();
 
+    /// Read the "Removable Devices" entry again (drives plugged in since it was last opened).
+    void refreshDevices();
+
   public slots:
     void slotAddQuickLink();
     void slotRemoveQuickLink();
