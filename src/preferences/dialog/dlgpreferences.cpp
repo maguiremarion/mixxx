@@ -1,6 +1,13 @@
 #include "preferences/dialog/dlgpreferences.h"
 
+#include <QAbstractItemView>
 #include <QApplication>
+#include <QComboBox>
+#include <QElapsedTimer>
+#include <QMouseEvent>
+#include <QPointer>
+#include <QScrollBar>
+#include <QVariantAnimation>
 #include <QDialog>
 #include <QEvent>
 #include <QMoveEvent>
@@ -13,6 +20,7 @@
 #include <QScreen>
 #include <QTimer>
 #include <QScrollArea>
+#include <QStyledItemDelegate>
 #include <QSlider>
 #include <QStyle>
 #include <QtGlobal>
@@ -58,6 +66,329 @@
 #ifdef Q_OS_MACOS
 #include "util/darkappearance.h"
 #endif
+
+namespace {
+// Finger scrolling for the kiosk: follows the finger with a short glide, keeps gliding a little
+// after the finger is lifted while moving. Used by the drop-down lists and by the Preferences pages.
+class DragScroller : public QObject {
+  public:
+    using QObject::QObject;
+
+    bool down() const {
+        return m_down;
+    }
+    bool dragging() const {
+        return m_dragging;
+    }
+    void press(int y, QScrollBar* pBar) {
+        if (m_pAnimation) {
+            m_pAnimation->stop();
+        }
+        m_down = true;
+        m_dragging = false;
+        m_pressY = y;
+        m_lastY = y;
+        m_velocity = 0.0;
+        m_clock.start();
+        m_lastMs = 0;
+        m_startValue = pBar->value();
+    }
+    // Returns true while the finger is dragging (the event is then used up).
+    bool move(int y, QScrollBar* pBar) {
+        if (!m_down) {
+            return false;
+        }
+        if (!m_dragging && qAbs(y - m_pressY) > 12) {
+            m_dragging = true;
+            m_startValue = pBar->value();
+            m_pressY = y; // scrolling starts from here, so the list does not jump by the 12 px
+            m_lastY = y;
+        }
+        if (!m_dragging) {
+            return false;
+        }
+        const qint64 now = m_clock.elapsed();
+        if (now > m_lastMs) {
+            const double v = static_cast<double>(y - m_lastY) / static_cast<double>(now - m_lastMs);
+            m_velocity = 0.5 * m_velocity + 0.5 * v;
+            m_lastMs = now;
+            m_lastY = y;
+        }
+        animateTo(pBar,
+                qBound(pBar->minimum(), m_startValue - (y - m_pressY), pBar->maximum()),
+                90,
+                QEasingCurve::OutQuad);
+        return true;
+    }
+    // Returns true if this was the end of a drag (then it is not a tap).
+    bool release(QScrollBar* pBar) {
+        const bool wasDragging = m_dragging;
+        m_down = false;
+        m_dragging = false;
+        if (wasDragging) {
+            const double velocity = -m_velocity; // scroll bar units per ms
+            if (qAbs(velocity) > 0.25) {
+                const int end = qBound(pBar->minimum(),
+                        pBar->value() + static_cast<int>(velocity * 260),
+                        pBar->maximum());
+                animateTo(pBar, end, 420, QEasingCurve::OutCubic);
+            }
+        }
+        return wasDragging;
+    }
+
+  private:
+    void animateTo(QScrollBar* pBar, int end, int durationMs, QEasingCurve::Type curve) {
+        if (!m_pAnimation) {
+            m_pAnimation = new QVariantAnimation(this);
+            connect(m_pAnimation, &QVariantAnimation::valueChanged, this, [this](const QVariant& value) {
+                if (m_pBar) {
+                    m_pBar->setValue(value.toInt());
+                }
+            });
+        }
+        m_pAnimation->stop();
+        m_pBar = pBar;
+        m_pAnimation->setDuration(durationMs);
+        m_pAnimation->setEasingCurve(curve);
+        m_pAnimation->setStartValue(pBar->value());
+        m_pAnimation->setEndValue(end);
+        m_pAnimation->start();
+    }
+
+    QVariantAnimation* m_pAnimation = nullptr;
+    QPointer<QScrollBar> m_pBar;
+    QElapsedTimer m_clock;
+    qint64 m_lastMs = 0;
+    bool m_down = false;
+    bool m_dragging = false;
+    int m_pressY = 0;
+    int m_lastY = 0;
+    int m_startValue = 0;
+    double m_velocity = 0.0; // pixels per ms, finger
+};
+
+// Rows of a drop-down list drawn by hand: flat, the text always at the same place. (The style
+// sheet's hover / selected states moved the text of the row under the finger.)
+class FlatListDelegate : public QStyledItemDelegate {
+  public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter* pPainter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override {
+        const bool selected = option.state.testFlag(QStyle::State_Selected);
+        // Only the selected row is marked. There is no hover colour: a finger leaves no "mouse
+        // left" event when a drag takes over, which kept the first-touched row grey.
+        pPainter->save();
+        pPainter->fillRect(option.rect,
+                selected ? QColor(0x34, 0x78, 0xf2) : QColor(0x18, 0x18, 0x18));
+        pPainter->setFont(option.font);
+        pPainter->setPen(selected ? QColor(Qt::white) : QColor(0xe5, 0xe6, 0xea));
+        const QRect textRect = option.rect.adjusted(12, 0, -12, 0);
+        pPainter->drawText(textRect,
+                Qt::AlignVCenter | Qt::AlignLeft,
+                QFontMetrics(option.font)
+                        .elidedText(index.data(Qt::DisplayRole).toString(),
+                                Qt::ElideMiddle,
+                                textRect.width()));
+        pPainter->restore();
+    }
+    QSize sizeHint(const QStyleOptionViewItem& option, const QModelIndex&) const override {
+        return QSize(option.rect.width(), 44);
+    }
+};
+
+// Drop-down lists in the kiosk: at most five rows (they scroll with the wide scroll bar from
+// dialogs.qss when there are more), text cut with "..." in the middle instead of being clipped,
+// and a finger dragged over the list scrolls it (the highlight used to follow the finger). A tap,
+// with no drag, still picks the row under the finger. The drag is handled here, before any
+// widget's own handling, because the list's popup also gets moves of a press that began on the
+// combo box itself.
+class KioskDropDownFilter : public QObject {
+  public:
+    explicit KioskDropDownFilter(QObject* pParent)
+            : QObject(pParent),
+              m_listScroller(this),
+              m_pageScroller(this) {
+    }
+    bool eventFilter(QObject* pObj, QEvent* pEvent) override {
+        switch (pEvent->type()) {
+        case QEvent::Polish:
+            if (auto* pCombo = qobject_cast<QComboBox*>(pObj)) {
+                pCombo->setMaxVisibleItems(5);
+                pCombo->setItemDelegate(new FlatListDelegate(pCombo));
+                if (auto* pView = pCombo->view()) {
+                    pView->setTextElideMode(Qt::ElideMiddle);
+                    pView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+                    pView->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+                }
+            }
+            return false;
+        case QEvent::Show:
+            if (pObj->inherits("QComboBoxPrivateContainer")) {
+                // The popup list scrolls by whole rows (the scroll bar counts rows) unless told
+                // otherwise: that made a drag jump from row to row. By the pixel, with the scroll
+                // bar always showing so one can see where in the list it is.
+                const auto prepare = [pPopup = QPointer<QObject>(pObj)]() {
+                    if (!pPopup) {
+                        return;
+                    }
+                    if (auto* pList = pPopup->findChild<QAbstractItemView*>()) {
+                        pList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+                        pList->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
+                        pList->verticalScrollBar()->setSingleStep(44);
+                    }
+                };
+                prepare();
+                QTimer::singleShot(0, pObj, prepare);
+            }
+            return false;
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseMove:
+        case QEvent::MouseButtonRelease:
+            break;
+        default:
+            return false;
+        }
+        if (m_sendingCancel) {
+            return false;
+        }
+        auto* pWidget = qobject_cast<QWidget*>(pObj);
+        if (!pWidget) {
+            return false;
+        }
+        auto* pMouse = static_cast<QMouseEvent*>(pEvent);
+        const QEvent::Type type = pEvent->type();
+        if (auto* pView = qobject_cast<QAbstractItemView*>(pWidget->parent());
+                pView && pView->viewport() == pWidget && pView->parentWidget() &&
+                pView->parentWidget()->inherits("QComboBoxPrivateContainer")) {
+            return filterList(pView, pMouse);
+        }
+        // A press anywhere on a Preferences page (not on a list or slider, which scroll or slide
+        // themselves) can start scrolling the page.
+        if (type == QEvent::MouseButtonPress) {
+            m_area = nullptr;
+            m_pendingCombo = nullptr;
+            m_target = nullptr;
+            if (pMouse->button() != Qt::LeftButton ||
+                    !pWidget->window()->inherits("DlgPreferences")) {
+                return false;
+            }
+            for (QWidget* pAncestor = pWidget; pAncestor; pAncestor = pAncestor->parentWidget()) {
+                if (auto* pArea = qobject_cast<QScrollArea*>(pAncestor)) {
+                    m_area = pArea;
+                    break;
+                }
+                if (pAncestor->inherits("QAbstractItemView") ||
+                        pAncestor->inherits("QAbstractSlider") ||
+                        pAncestor->inherits("QAbstractScrollArea") ||
+                        pAncestor->inherits("QAbstractSpinBox") ||
+                        pAncestor->inherits("QLineEdit")) {
+                    return false;
+                }
+                if (pAncestor->window() == pAncestor) {
+                    return false;
+                }
+            }
+            if (!m_area || m_area->verticalScrollBar()->maximum() <= 0) {
+                m_area = nullptr;
+                return false;
+            }
+            m_pageScroller.press(pMouse->globalPosition().toPoint().y(), m_area->verticalScrollBar());
+            m_target = pWidget;
+            // A drop-down opens on the press: wait for the lift instead, so a drag can scroll
+            if (auto* pCombo = qobject_cast<QComboBox*>(pWidget)) {
+                m_pendingCombo = pCombo;
+                return true;
+            }
+            // A label, a frame or the page itself ignores the press, and then no moves follow
+            // it: take the press so they arrive. (Buttons take it themselves.)
+            return !pWidget->inherits("QAbstractButton");
+        }
+        if (!m_area || !m_pageScroller.down()) {
+            return false;
+        }
+        QScrollBar* pBar = m_area->verticalScrollBar();
+        if (type == QEvent::MouseMove) {
+            const bool wasDragging = m_pageScroller.dragging();
+            if (!m_pageScroller.move(pMouse->globalPosition().toPoint().y(), pBar)) {
+                return m_pendingCombo != nullptr;
+            }
+            if (!wasDragging && m_target && !m_pendingCombo) {
+                // cancel the press the widget under the finger got: release outside of it
+                m_sendingCancel = true;
+                QMouseEvent cancel(QEvent::MouseButtonRelease,
+                        QPointF(-1000, -1000),
+                        pMouse->globalPosition(),
+                        Qt::LeftButton,
+                        Qt::NoButton,
+                        Qt::NoModifier);
+                QCoreApplication::sendEvent(m_target, &cancel);
+                m_sendingCancel = false;
+            }
+            return true;
+        }
+        // release
+        const bool wasDragging = m_pageScroller.release(pBar);
+        QPointer<QComboBox> pCombo = m_pendingCombo;
+        m_pendingCombo = nullptr;
+        m_area = nullptr;
+        if (pCombo && !wasDragging) {
+            QTimer::singleShot(0, pCombo, [pCombo]() {
+                if (pCombo) {
+                    pCombo->showPopup();
+                }
+            });
+        }
+        return wasDragging || pCombo;
+    }
+
+  private:
+    bool filterList(QAbstractItemView* pView, QMouseEvent* pMouse) {
+        auto* pBar = pView->verticalScrollBar();
+        const int y = pMouse->position().toPoint().y();
+        if (pMouse->type() == QEvent::MouseButtonRelease) {
+            return m_listScroller.release(pBar); // the end of a drag is not a pick
+        }
+        const bool left = pMouse->type() == QEvent::MouseButtonPress
+                ? pMouse->button() == Qt::LeftButton
+                : pMouse->buttons().testFlag(Qt::LeftButton);
+        if (!left) {
+            return false;
+        }
+        if (pMouse->type() == QEvent::MouseButtonPress || !m_listScroller.down()) {
+            m_listScroller.press(y, pBar);
+            return false;
+        }
+        const bool wasDragging = m_listScroller.dragging();
+        const bool dragging = m_listScroller.move(y, pBar);
+        if (dragging && !wasDragging) {
+            // The list took the press (the row stays "pressed" and drawn as such): end it
+            // outside every row, which picks nothing.
+            m_sendingCancel = true;
+            QMouseEvent cancel(QEvent::MouseButtonRelease,
+                    QPointF(-1000, -1000),
+                    pMouse->globalPosition(),
+                    Qt::LeftButton,
+                    Qt::NoButton,
+                    Qt::NoModifier);
+            QCoreApplication::sendEvent(pView->viewport(), &cancel);
+            QEvent leave(QEvent::Leave);
+            QCoreApplication::sendEvent(pView->viewport(), &leave);
+            pView->viewport()->update();
+            m_sendingCancel = false;
+        }
+        return dragging;
+    }
+
+    DragScroller m_listScroller;
+    DragScroller m_pageScroller;
+    QPointer<QScrollArea> m_area;
+    QPointer<QWidget> m_target;
+    QPointer<QComboBox> m_pendingCombo;
+    bool m_sendingCancel = false;
+};
+} // namespace
 
 DlgPreferences::DlgPreferences(
         std::shared_ptr<mixxx::ScreensaverManager> pScreensaverManager,
@@ -291,6 +622,7 @@ DlgPreferences::DlgPreferences(
 
     if (kioskMode()) {
         useKioskButtons();
+        qApp->installEventFilter(new KioskDropDownFilter(this));
     }
 
     labelWarning->hide();
@@ -725,7 +1057,7 @@ void DlgPreferences::setVisible(bool visible) {
     if (kiosk) {
         stripLinks();
         // A wider page list: "Controllers > DDJ-FLX2 ..." and "Sound Hardware" were cut off.
-        constexpr int kKioskPageListWidth = 220;
+        constexpr int kKioskPageListWidth = 260;
         contentsTreeWidget->setMinimumWidth(kKioskPageListWidth);
         splitter->setSizes({kKioskPageListWidth, std::max(400, width() - kKioskPageListWidth)});
     }

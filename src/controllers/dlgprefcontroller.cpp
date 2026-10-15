@@ -424,7 +424,7 @@ void DlgPrefController::applyKioskLayout() {
     pMappingLayout->addWidget(makeText(tr("MAPPING"), "SectionLabel", pMappingCard));
     auto* pMappingRow = new QHBoxLayout();
     pMappingRow->setSpacing(10);
-    constexpr int kControlHeight = 52;
+    constexpr int kControlHeight = 56;
     m_ui.comboBoxMapping->setFixedHeight(kControlHeight);
     m_ui.comboBoxMapping->setMaximumWidth(520);
     m_ui.comboBoxMapping->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);

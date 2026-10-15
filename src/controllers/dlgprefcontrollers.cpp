@@ -171,7 +171,7 @@ void DlgPrefControllers::applyKioskLayout() {
     txtMappingsOverview->setObjectName(QStringLiteral("PageText"));
     pFilesLayout->addWidget(txtMappingsOverview);
     btnOpenUserMappings->setText(tr("See available mapping files"));
-    btnOpenUserMappings->setFixedHeight(44);
+    btnOpenUserMappings->setFixedHeight(52);
     pFilesLayout->addWidget(btnOpenUserMappings, 0, Qt::AlignLeft);
     pLayout->addWidget(pFilesCard);
     pLayout->addStretch(1);

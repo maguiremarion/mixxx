@@ -90,6 +90,28 @@ const QString kKeylockMultiThreadedUnavailableRubberband =
 
 /// Construct a new sound preferences pane. Initializes and populates
 /// all the controls to the values obtained from SoundManager.
+namespace {
+// Keeps the picker that replaces a spin box enabled and disabled with it.
+class SpinEnabledMirror : public QObject {
+  public:
+    SpinEnabledMirror(QDoubleSpinBox* pSpin, QComboBox* pCombo)
+            : QObject(pSpin),
+              m_pSpin(pSpin),
+              m_pCombo(pCombo) {
+    }
+    bool eventFilter(QObject* pObj, QEvent* pEvent) override {
+        if (pObj == m_pSpin && pEvent->type() == QEvent::EnabledChange) {
+            m_pCombo->setEnabled(m_pSpin->isEnabled());
+        }
+        return false;
+    }
+
+  private:
+    QDoubleSpinBox* m_pSpin;
+    QComboBox* m_pCombo;
+};
+} // namespace
+
 DlgPrefSound::DlgPrefSound(QWidget* pParent,
         std::shared_ptr<SoundManager> pSoundManager,
         UserSettingsPointer pSettings)
@@ -153,7 +175,7 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
         // The longest device name must not make the page wider than the screen.
         for (QComboBox* pCombo : findChildren<QComboBox*>()) {
             pCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-            pCombo->setMinimumContentsLength(16);
+            pCombo->setMinimumContentsLength(14);
         }
         verticalLayout_2->insertWidget(0, pCard);
     }
@@ -193,11 +215,13 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
             QOverload<int>::of(&QComboBox::currentIndexChanged),
             this,
             &DlgPrefSound::apiChanged);
-    apiLabel->setText(apiLabel->text() + QChar(' ') +
-            coloredLinkString(
-                    m_pLinkColor,
-                    QStringLiteral("(?)"),
-                    MIXXX_MANUAL_SOUND_API_URL));
+    if (!DlgPreferences::kioskMode()) { // no links (and no "(?)" left where they were) in the kiosk
+        apiLabel->setText(apiLabel->text() + QChar(' ') +
+                coloredLinkString(
+                        m_pLinkColor,
+                        QStringLiteral("(?)"),
+                        MIXXX_MANUAL_SOUND_API_URL));
+    }
 
     const auto sampleRates = m_pSoundManager->getSampleRates();
     updateSampleRates(sampleRates);
@@ -262,6 +286,44 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
             QOverload<double>::of(&QDoubleSpinBox::valueChanged),
             this,
             &DlgPrefSound::boothDelaySpinboxChanged);
+
+    if (DlgPreferences::kioskMode()) {
+        // No keyboard: the delays are picked from a list (every 5 ms up to 100) instead of typed.
+        // The spin box stays as the model behind it (all the load / save / reset code uses it).
+        for (QDoubleSpinBox* pSpin : {latencyCompensationSpinBox,
+                     mainDelaySpinBox,
+                     headDelaySpinBox,
+                     boothDelaySpinBox}) {
+            auto* pCombo = new QComboBox(this);
+            pCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+            pCombo->setMinimumContentsLength(14);
+            for (int ms = 0; ms <= 100; ms += 5) {
+                pCombo->addItem(tr("%1 ms").arg(ms), static_cast<double>(ms));
+            }
+            const auto showValue = [pCombo](double value) {
+                QSignalBlocker blocker(pCombo);
+                int index = pCombo->findData(value);
+                if (index < 0) {
+                    // a value from an older setting that is not on the list: keep it, in order
+                    index = 0;
+                    while (index < pCombo->count() && pCombo->itemData(index).toDouble() < value) {
+                        ++index;
+                    }
+                    pCombo->insertItem(index, tr("%1 ms").arg(value, 0, 'g', 4), value);
+                }
+                pCombo->setCurrentIndex(index);
+            };
+            connect(pSpin, QOverload<double>::of(&QDoubleSpinBox::valueChanged), pCombo, showValue);
+            connect(pCombo, &QComboBox::activated, pSpin, [pSpin, pCombo](int index) {
+                pSpin->setValue(pCombo->itemData(index).toDouble());
+            });
+            pSpin->installEventFilter(new SpinEnabledMirror(pSpin, pCombo));
+            gridLayout->replaceWidget(pSpin, pCombo);
+            pSpin->hide();
+            pCombo->setEnabled(pSpin->isEnabled());
+            showValue(pSpin->value());
+        }
+    }
 
     micMonitorModeComboBox->addItem(tr("Main output only"),
             QVariant(static_cast<int>(EngineMixer::MicMonitorMode::Main)));
@@ -562,17 +624,19 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
 
     setScrollSafeGuardForAllInputWidgets(this);
 
-    micMonitorModeLabel->setText(micMonitorModeLabel->text() + QChar(' ') +
-            coloredLinkString(
-                    m_pLinkColor,
-                    QStringLiteral("(?)"),
-                    MIXXX_MANUAL_MIC_MONITOR_MODES_URL));
+    if (!DlgPreferences::kioskMode()) {
+        micMonitorModeLabel->setText(micMonitorModeLabel->text() + QChar(' ') +
+                coloredLinkString(
+                        m_pLinkColor,
+                        QStringLiteral("(?)"),
+                        MIXXX_MANUAL_MIC_MONITOR_MODES_URL));
 
-    latencyCompensationLabel->setText(latencyCompensationLabel->text() + QChar(' ') +
-            coloredLinkString(
-                    m_pLinkColor,
-                    QStringLiteral("(?)"),
-                    MIXXX_MANUAL_MIC_LATENCY_URL));
+        latencyCompensationLabel->setText(latencyCompensationLabel->text() + QChar(' ') +
+                coloredLinkString(
+                        m_pLinkColor,
+                        QStringLiteral("(?)"),
+                        MIXXX_MANUAL_MIC_LATENCY_URL));
+    }
 
     hardwareGuide->setText(
             tr("The %1 lists sound cards and controllers you may want to "
@@ -727,11 +791,11 @@ void DlgPrefSound::showSection(Section section) {
     }
     switch (section) {
     case Section::Output:
-        m_pIntro->setText(tr("Choose the audio device for the main speakers and the one for "
-                             "your headphones."));
+        m_pIntro->setText(tr("Choose the audio devices for your main speakers, headphones, "
+                             "booth and more."));
         break;
     case Section::Input:
-        m_pIntro->setText(tr("Choose the audio device for a microphone or another source."));
+        m_pIntro->setText(tr("Choose the audio device for a microphone or another input source."));
         break;
     case Section::Settings:
         m_pIntro->setText(tr("The audio quality and delay. A smaller audio buffer means less "
