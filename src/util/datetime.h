@@ -37,7 +37,8 @@ inline QString formatDate(
         return QString();
     }
     if (format.isEmpty()) {
-        return QLocale().toString(date, QLocale::ShortFormat);
+        // American, whatever the system's region says: 10/16/2026
+        return date.toString(QStringLiteral("MM/dd/yyyy"));
     }
     return date.toString(format);
 }
@@ -51,7 +52,7 @@ inline QString formatDateTime(
         return QString();
     }
     if (format.isEmpty()) {
-        return QLocale().toString(dt, QLocale::ShortFormat);
+        return dt.toString(QStringLiteral("MM/dd/yyyy h:mm AP"));
     }
     return dt.toString(format);
 }

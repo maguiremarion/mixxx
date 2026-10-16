@@ -29,6 +29,8 @@ class PlaylistTableModel final : public TrackSetTableModel {
     QList<QPair<int, int>> defaultColumnLayout() const override;
     int defaultColumnLayoutVersion() const override;
     int defaultFlexibleColumn() const override;
+    /// The History list (one playlist of everything that was played)
+    bool isHistory() const;
 
     bool isColumnInternal(int column) final;
     bool isColumnHiddenByDefault(int column) final;

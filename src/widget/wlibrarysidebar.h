@@ -1,5 +1,7 @@
 #pragma once
 
+#include "control/controlproxy.h"
+
 #include <QBasicTimer>
 #include <QModelIndex>
 #include <QColor>
@@ -89,6 +91,8 @@ class WLibrarySidebar : public QTreeView, public WBaseWidget {
     QModelIndex m_hoverIndex;
     bool m_lastDragMoveAccepted;
     int m_featureIconSize = 0;
+    // 1 while an Auto DJ session runs: the Auto DJ row then shows a green dot and "Active"
+    ControlProxy m_autoDjSession;
     QColor m_branchLineColor = QColor(0x58, 0x58, 0x58);
     // A removable drive's row (Rekordbox drives) has an eject button at its right end.
     bool ejectButtonAt(const QModelIndex& index, QRect* pRect, QString* pDrivePath) const;

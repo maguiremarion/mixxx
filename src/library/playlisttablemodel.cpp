@@ -197,7 +197,9 @@ void PlaylistTableModel::selectPlaylist(int playlistId) {
 
     // Restore search text
     setSearch(m_searchTexts.value(m_iPlaylistId));
-    setDefaultSort(fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), Qt::AscendingOrder);
+    // History reads newest first; every other playlist from its first track
+    setDefaultSort(fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION),
+            isHistory() ? Qt::DescendingOrder : Qt::AscendingOrder);
     setSort(defaultSortColumn(), defaultSortOrder());
 }
 
@@ -389,7 +391,24 @@ mixxx::Duration PlaylistTableModel::getTotalDuration(const QModelIndexList& indi
     return mixxx::Duration::fromSeconds(durationTotal);
 }
 
+bool PlaylistTableModel::isHistory() const {
+    return settingsNamespace() == QLatin1String("mixxx.db.model.setlog");
+}
+
 QList<QPair<int, int>> PlaylistTableModel::defaultColumnLayout() const {
+    if (isHistory()) {
+        // The History page: # (counts up to a few hundred), cover, title, artist, key, BPM, and
+        // when it was last played (this one stretches to the edge)
+        return {
+                {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 38},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 230},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 170},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_LAST_PLAYED_AT), 160},
+        };
+    }
     if (m_iPlaylistId != m_pTrackCollectionManager->internalCollection()
                                  ->getPlaylistDAO()
                                  .getPlaylistIdFromName(AUTODJ_TABLE)) {
@@ -418,6 +437,9 @@ int PlaylistTableModel::defaultFlexibleColumn() const {
 }
 
 int PlaylistTableModel::defaultColumnLayoutVersion() const {
+    if (isHistory()) {
+        return 1;
+    }
     // 1: # / cover / title / artist / BPM / key
     // 2: the cover column as wide as Rekordbox's (the art is square)
     // 3: # as narrow as Rekordbox's, and Duration after Key

@@ -31,6 +31,9 @@ class SetlogFeature : public BasePlaylistFeature {
     void slotUnlockAllChildPlaylists();
     void slotDeletePlaylist() override;
     void slotGetNewPlaylist();
+    // Kiosk: one History page of everything played, kept to a limited length
+    void useSingleHistory();
+    void trimHistory();
     void activate() override;
     void activateChild(const QModelIndex& index) override;
 

@@ -1,5 +1,7 @@
 #include "library/trackset/setlogfeature.h"
 
+#include <algorithm>
+
 #include <QDateTime>
 #include <QMenu>
 #include <QSqlTableModel>
@@ -13,6 +15,7 @@
 #include "library/treeitem.h"
 #include "mixer/playerinfo.h"
 #include "moc_setlogfeature.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "track/track.h"
 #include "util/make_const_iterator.h"
 #include "widget/wlibrary.h"
@@ -230,6 +233,9 @@ void SetlogFeature::onRightClickChild(const QPoint& globalPos, const QModelIndex
 /// Use a custom model in the history for grouping by year
 /// @param selectedId row which should be selected
 QModelIndex SetlogFeature::constructChildModel(int selectedId) {
+    if (DlgPreferences::kioskMode()) {
+        return QModelIndex(); // History is one page, no list of sessions under it
+    }
     // qDebug() << "SetlogFeature::constructChildModel() selected:" << selectedId;
     // Setup the sidebar playlist model
     QSqlDatabase database =
@@ -358,8 +364,63 @@ void SetlogFeature::decorateChild(TreeItem* item, int playlistId) {
 }
 
 /// Invoked on startup to create new current playlist and by "Finish current and start new"
+namespace {
+// The History keeps about this many played tracks (the oldest go first). It is trimmed in steps of
+// kHistoryTrimSlack so it is not done on every track.
+constexpr int kHistoryMaxTracks = 300;
+constexpr int kHistoryTrimSlack = 50;
+} // namespace
+
+void SetlogFeature::useSingleHistory() {
+    // Everything played goes into one list: all earlier sessions are joined into the oldest one
+    // (date and order kept) and that list carries on being filled.
+    QList<QPair<int, QString>> sessions = m_playlistDao.getPlaylists(PlaylistDAO::PLHT_SET_LOG);
+    std::sort(sessions.begin(), sessions.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+    int target = kInvalidPlaylistId;
+    if (sessions.isEmpty()) {
+        target = m_playlistDao.createPlaylist(tr("History"), PlaylistDAO::PLHT_SET_LOG);
+    } else {
+        target = sessions.first().first;
+        m_playlistDao.setPlaylistLocked(target, false);
+        for (int i = 1; i < sessions.size(); ++i) {
+            const int sessionId = sessions.at(i).first;
+            m_playlistDao.setPlaylistLocked(sessionId, false);
+            if (m_playlistDao.copyPlaylistTracks(sessionId, target)) {
+                m_playlistDao.deletePlaylist(sessionId);
+            }
+        }
+    }
+    m_currentPlaylistId = target;
+    if (m_currentPlaylistId != kInvalidPlaylistId) {
+        m_playlistDao.setCurrentHistoryPlaylistId(m_currentPlaylistId);
+    }
+    m_recentTracks.clear();
+    trimHistory();
+}
+
+void SetlogFeature::trimHistory() {
+    if (m_currentPlaylistId == kInvalidPlaylistId) {
+        return;
+    }
+    const int count = m_playlistDao.tracksInPlaylist(m_currentPlaylistId);
+    if (count <= kHistoryMaxTracks + kHistoryTrimSlack) {
+        return;
+    }
+    QList<int> oldest;
+    for (int position = 1; position <= count - kHistoryMaxTracks; ++position) {
+        oldest.append(position);
+    }
+    m_playlistDao.removeTracksFromPlaylist(m_currentPlaylistId, oldest);
+}
+
 void SetlogFeature::slotGetNewPlaylist() {
     //qDebug() << "slotGetNewPlaylist() successfully triggered !";
+    if (DlgPreferences::kioskMode()) {
+        useSingleHistory();
+        return;
+    }
 
     // create a new playlist for today
     QString set_log_name_format;
@@ -661,9 +722,13 @@ void SetlogFeature::slotPlayingTrackChanged(TrackPointer currentPlayingTrack) {
         m_playlistDao.appendTrackToPlaylist(
                 currentPlayingTrackId, m_currentPlaylistId);
     }
+    trimHistory();
 }
 
 void SetlogFeature::slotPlaylistTableChanged(int playlistId) {
+    if (DlgPreferences::kioskMode()) {
+        return;
+    }
     // qDebug() << "SetlogFeature::slotPlaylistTableChanged() id:" << playlistId;
     PlaylistDAO::HiddenType type = m_playlistDao.getHiddenType(playlistId);
     if (type != PlaylistDAO::PLHT_SET_LOG &&
@@ -721,6 +786,9 @@ void SetlogFeature::slotPlaylistTableChanged(int playlistId) {
 }
 
 void SetlogFeature::slotPlaylistContentOrLockChanged(const QSet<int>& playlistIds) {
+    if (DlgPreferences::kioskMode()) {
+        return;
+    }
     // qDebug() << "SetlogFeature::slotPlaylistContentOrLockChanged() for"
     //          << playlistIds.count() << "playlist(s)";
     QSet<int> idsToBeUpdated;
@@ -733,6 +801,9 @@ void SetlogFeature::slotPlaylistContentOrLockChanged(const QSet<int>& playlistId
 }
 
 void SetlogFeature::slotPlaylistTableRenamed(int playlistId, const QString& newName) {
+    if (DlgPreferences::kioskMode()) {
+        return;
+    }
     Q_UNUSED(newName);
     // qDebug() << "SetlogFeature::slotPlaylistTableRenamed() Id:" << playlistId;
     if (m_playlistDao.getHiddenType(playlistId) == PlaylistDAO::PLHT_SET_LOG) {
@@ -741,6 +812,19 @@ void SetlogFeature::slotPlaylistTableRenamed(int playlistId, const QString& newN
 }
 
 void SetlogFeature::activate() {
+    if (DlgPreferences::kioskMode()) {
+        // The one History page
+        m_lastClickedIndex = m_pSidebarModel->getRootIndex();
+        m_lastRightClickedIndex = QModelIndex();
+        if (m_currentPlaylistId == kInvalidPlaylistId) {
+            return;
+        }
+        emit saveModelState();
+        m_pPlaylistTableModel->selectPlaylist(m_currentPlaylistId);
+        emit showTrackModel(m_pPlaylistTableModel);
+        emit enableCoverArtDisplay(true);
+        return;
+    }
     // The root item was clicked, so activate the current playlist.
     m_lastClickedIndex = m_pSidebarModel->getRootIndex();
     m_lastRightClickedIndex = QModelIndex();

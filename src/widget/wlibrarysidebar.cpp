@@ -30,7 +30,14 @@ WLibrarySidebar::WLibrarySidebar(QWidget* parent)
         : QTreeView(parent),
           WBaseWidget(this),
           m_hoverExpandDelay(mixxx::library::prefs::kSidebarHoverExpandDelayDefault),
-          m_lastDragMoveAccepted(false) {
+          m_lastDragMoveAccepted(false),
+          m_autoDjSession(ConfigKey(QStringLiteral("[AutoDJ]"), QStringLiteral("session_active")),
+                  this,
+                  ControlFlag::AllowMissingOrInvalid) {
+    // Repaint when a session starts or ends: the Auto DJ row says so
+    m_autoDjSession.connectValueChanged(this, [this](double) {
+        viewport()->update();
+    });
     qRegisterMetaType<FocusWidget>("FocusWidget");
     //Set some properties
     setHeaderHidden(true);
@@ -198,6 +205,29 @@ void WLibrarySidebar::drawRow(QPainter* pPainter,
         const QStyleOptionViewItem& option,
         const QModelIndex& index) const {
     QTreeView::drawRow(pPainter, option, index);
+    // While an Auto DJ session runs its row carries a green dot and "Active" at the right, so it
+    // shows on every page, not only on Auto DJ's own.
+    if (!index.parent().isValid() && m_autoDjSession.toBool() &&
+            index.data(SidebarModel::IconNameRole).toString() == QStringLiteral("autodj")) {
+        pPainter->save();
+        pPainter->setRenderHint(QPainter::Antialiasing, true);
+        QFont font = pPainter->font();
+        font.setPixelSize(12);
+        font.setWeight(QFont::Bold);
+        pPainter->setFont(font);
+        const QString text = tr("Active");
+        const QRect row = option.rect;
+        const int textWidth = QFontMetrics(font).horizontalAdvance(text);
+        const int right = row.right() - 12;
+        const QRect textRect(right - textWidth, row.top(), textWidth + 1, row.height());
+        const QColor green(0x3d, 0xdc, 0x84);
+        pPainter->setPen(green);
+        pPainter->drawText(textRect, Qt::AlignVCenter | Qt::AlignRight, text);
+        pPainter->setPen(Qt::NoPen);
+        pPainter->setBrush(green);
+        pPainter->drawEllipse(QPointF(textRect.left() - 10, row.center().y() + 0.5), 4.5, 4.5);
+        pPainter->restore();
+    }
     QRect button;
     QString path;
     if (!ejectButtonAt(index, &button, &path)) {

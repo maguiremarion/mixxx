@@ -726,6 +726,8 @@ void WTrackTableView::addToAutoDJSession(int what) {
         QList<QPersistentModelIndex> rows;
         int next = 0;
         bool skipQueued = false;
+        int added = 0;
+        int missing = 0; // tracks whose file is not there (e.g. their drive is unplugged)
         QSet<TrackId> queued;
         QPointer<QAbstractItemModel> model;
     };
@@ -761,8 +763,15 @@ void WTrackTableView::addToAutoDJSession(int what) {
             if (job->skipQueued && job->queued.contains(id)) {
                 continue;
             }
+            if (!pTrack->getFileInfo().checkFileExists()) {
+                // A track in History or an old list can point at a drive that is not plugged in:
+                // it would only fail to load later and be dropped from the queue.
+                ++job->missing;
+                continue;
+            }
             job->queued.insert(id);
             batch.append(id);
+            ++job->added;
         }
         if (!batch.isEmpty()) {
             m_pLibrary->trackCollectionManager()->unhideTracks(batch);
@@ -774,6 +783,17 @@ void WTrackTableView::addToAutoDJSession(int what) {
         if (job->next >= job->rows.size()) {
             pTimer->stop();
             pTimer->deleteLater();
+            if (job->missing > 0) {
+                // Say so, so a tap that added nothing is not a mystery
+                const QString text = job->added > 0
+                        ? tr("%n track(s) skipped: not available. Is their drive plugged in?",
+                                  "",
+                                  job->missing)
+                        : tr("Not available. Is the drive with this music plugged in?");
+                if (QWidget* pWindow = window()) {
+                    WNotice::show(pWindow, text, pWindow->mapFromGlobal(QCursor::pos()), true);
+                }
+            }
         }
     });
     pTimer->start();
