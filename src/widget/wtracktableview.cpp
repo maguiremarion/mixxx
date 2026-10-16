@@ -5,6 +5,8 @@
 #endif
 
 #include <QDir>
+#include <QSet>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QLabel>
@@ -42,6 +44,7 @@
 #include "moc_wtracktableview.cpp"
 #include "preferences/colorpalettesettings.h"
 #include "preferences/dialog/dlgprefdeck.h"
+#include "preferences/dialog/dlgpreferences.h"
 #include "preferences/dialog/dlgpreflibrary.h"
 #include "sources/soundsourceproxy.h"
 #include "track/track.h"
@@ -249,6 +252,10 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* pNewModel, bool restore
 
         if (restoreState) {
             restoreCurrentViewState();
+            // The scroll position comes back, the highlighted row does not (kiosk)
+            if (DlgPreferences::kioskMode()) {
+                clearSelection();
+            }
         }
         return;
     } else if (pCurrModel) {
@@ -413,6 +420,10 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* pNewModel, bool restore
     // trigger restoring scrollBar position, selection etc.
     if (restoreState) {
         restoreCurrentViewState();
+        // The scroll position comes back, the highlighted row does not (kiosk)
+        if (DlgPreferences::kioskMode()) {
+            clearSelection();
+        }
     }
     initTrackMenu();
 }
@@ -447,6 +458,14 @@ void WTrackTableView::initTrackMenu() {
             &WTrackMenu::restoreCurrentViewStateOrIndex,
             this,
             &WTrackTableView::slotrestoreCurrentIndex);
+}
+
+void WTrackTableView::hideEvent(QHideEvent* pEvent) {
+    WLibraryTableView::hideEvent(pEvent);
+    // Leaving a page forgets the row that was tapped on it: coming back it is not still blue.
+    if (!pEvent->spontaneous() && DlgPreferences::kioskMode()) {
+        clearSelection();
+    }
 }
 
 void WTrackTableView::slotRowClicked(const QModelIndex& index) {
@@ -523,9 +542,17 @@ void WTrackTableView::showLoadPopup() {
     pPopup->setObjectName(QStringLiteral("LoadPopup"));
     pPopup->setAttribute(Qt::WA_DeleteOnClose);
     pPopup->setAttribute(Qt::WA_StyledBackground);
-    auto* pLayout = new QHBoxLayout(pPopup);
+    // A title over the two decks (they stay side by side: they stand for two real decks)
+    auto* pOuter = new QVBoxLayout(pPopup);
+    pOuter->setContentsMargins(0, 0, 0, 0);
+    pOuter->setSpacing(0);
+    auto* pTitle = new QLabel(tr("LOAD TRACK"), pPopup);
+    pTitle->setObjectName(QStringLiteral("LoadPopupTitle"));
+    pOuter->addWidget(pTitle);
+    auto* pLayout = new QHBoxLayout();
     pLayout->setContentsMargins(0, 0, 0, 0);
     pLayout->setSpacing(0);
+    pOuter->addLayout(pLayout);
 
     // Decks 3/4 only when the skin is in 4-deck mode.
     const int numDecks =
@@ -535,7 +562,7 @@ void WTrackTableView::showLoadPopup() {
             : 2;
     for (int deck = 1; deck <= numDecks; ++deck) {
         const QString group = PlayerManager::groupForDeck(deck - 1);
-        auto* pButton = new QPushButton(tr("Load %1").arg(deck), pPopup);
+        auto* pButton = new QPushButton(tr("Deck %1").arg(deck), pPopup);
         pButton->setObjectName(QStringLiteral("LoadPopupButton"));
         pButton->setFocusPolicy(Qt::NoFocus);
         pLayout->addWidget(pButton);
@@ -544,7 +571,7 @@ void WTrackTableView::showLoadPopup() {
                 // Keep the popup open and say why nothing loaded, then restore the label.
                 Q_UNUSED(deck);
                 pButton->setText(tr("Pause deck before loading"));
-                const QString label = tr("Load %1").arg(deck);
+                const QString label = tr("Deck %1").arg(deck);
                 QPointer<QPushButton> pGuard(pButton);
                 QPointer<QFrame> pPopupGuard(pPopup);
                 QTimer::singleShot(kLoadPopupMessageMs, pButton, [pGuard, pPopupGuard, label]() {
@@ -594,26 +621,34 @@ void WTrackTableView::showAutoDJSessionPopup() {
     pPopup->setObjectName(QStringLiteral("LoadPopup"));
     pPopup->setAttribute(Qt::WA_DeleteOnClose);
     pPopup->setAttribute(Qt::WA_StyledBackground);
-    auto* pLayout = new QHBoxLayout(pPopup);
+    // Stacked, under a title: these are choices about what to add, not two decks side by side
+    // like Load 1 / Load 2, which have a real-world counterpart.
+    auto* pLayout = new QVBoxLayout(pPopup);
     pLayout->setContentsMargins(0, 0, 0, 0);
     pLayout->setSpacing(0);
+    auto* pTitle = new QLabel(tr("AUTO DJ"), pPopup);
+    pTitle->setObjectName(QStringLiteral("LoadPopupTitle"));
+    pLayout->addWidget(pTitle);
 
-    auto* pButton = new QPushButton(
-            isQueue ? tr("REMOVE FROM SESSION") : tr("ADD TO AUTO DJ"), pPopup);
-    pButton->setObjectName(QStringLiteral("LoadPopupButton"));
-    pButton->setFocusPolicy(Qt::NoFocus);
-    pLayout->addWidget(pButton);
-    connect(pButton, &QPushButton::clicked, this, [this, pPopup, isQueue]() {
-        if (isQueue) {
-            if (auto* pModel = getTrackModel()) {
-                pModel->removeTracks(getSelectedRows());
-            }
+    const auto addButton = [this, pPopup, pLayout](const QString& text, int what) {
+        auto* pButton = new QPushButton(text, pPopup);
+        pButton->setObjectName(QStringLiteral("LoadPopupButton"));
+        pButton->setFocusPolicy(Qt::NoFocus);
+        pLayout->addWidget(pButton);
+        connect(pButton, &QPushButton::clicked, this, [this, pPopup, what]() {
             pPopup->close();
-            return;
-        }
-        addSelectedToAutoDJSession();
-        pPopup->close();
-    });
+            addToAutoDJSession(what);
+        });
+    };
+    if (isQueue) {
+        addButton(tr("Remove This Track"), -1);
+        addButton(tr("Remove This Track and Below"), -2);
+        addButton(tr("Remove All Tracks"), -3);
+    } else {
+        addButton(tr("Add This Track"), 0);
+        addButton(tr("Add This Track and Below"), 1);
+        addButton(tr("Add All Tracks in List"), 2);
+    }
 
     pPopup->adjustSize();
     QPoint pos = QCursor::pos();
@@ -626,29 +661,122 @@ void WTrackTableView::showAutoDJSessionPopup() {
     pPopup->show();
 }
 
-void WTrackTableView::addSelectedToAutoDJSession() {
+// what: 0 add the selected track(s), 1 add the selected track and everything below it in the list,
+// 2 add the whole list (all in the order the list shows them). On the queue itself: -1 take the
+// selected track(s) out, -2 take them and everything below out, -3 empty the queue.
+void WTrackTableView::addToAutoDJSession(int what) {
     auto* pTrackModel = getTrackModel();
-    if (!pTrackModel) {
+    QAbstractItemModel* pItemModel = model();
+    if (!pTrackModel || !pItemModel) {
         return;
     }
-    // Tracks of Rekordbox / Serato / Browse lists are put into the library when they are asked for,
-    // which is also what gives them the id the queue needs.
-    QList<TrackId> trackIds;
-    const QModelIndexList rows = getSelectedRows();
-    for (const QModelIndex& row : rows) {
-        const TrackPointer pTrack = pTrackModel->getTrack(row);
-        if (pTrack && pTrack->getId().isValid()) {
-            trackIds.append(pTrack->getId());
+    const QModelIndexList selected = getSelectedRows();
+    if (what < 0) {
+        QModelIndexList doomed;
+        if (what == -1) {
+            doomed = selected;
+        } else {
+            int firstRow = 0;
+            if (what == -2) {
+                if (selected.isEmpty()) {
+                    return;
+                }
+                firstRow = selected.first().row();
+                for (const QModelIndex& index : selected) {
+                    firstRow = qMin(firstRow, index.row());
+                }
+            }
+            for (int row = firstRow; row < pItemModel->rowCount(); ++row) {
+                doomed.append(pItemModel->index(row, 0));
+            }
+        }
+        if (!doomed.isEmpty()) {
+            pTrackModel->removeTracks(doomed);
+        }
+        return;
+    }
+    QList<QPersistentModelIndex> rows;
+    if (what == 0) {
+        for (const QModelIndex& index : selected) {
+            rows.append(QPersistentModelIndex(index));
+        }
+    } else {
+        int firstRow = 0;
+        if (what == 1) {
+            if (selected.isEmpty()) {
+                return;
+            }
+            firstRow = selected.first().row();
+            for (const QModelIndex& index : selected) {
+                firstRow = qMin(firstRow, index.row());
+            }
+        }
+        for (int row = firstRow; row < pItemModel->rowCount(); ++row) {
+            rows.append(QPersistentModelIndex(pItemModel->index(row, 0)));
         }
     }
-    if (trackIds.isEmpty()) {
+    if (rows.isEmpty()) {
         return;
     }
-    m_pLibrary->trackCollectionManager()->unhideTracks(trackIds);
-    m_pLibrary->trackCollectionManager()
-            ->internalCollection()
-            ->getPlaylistDAO()
-            .addTracksToAutoDJQueue(trackIds, PlaylistDAO::AutoDJSendLoc::BOTTOM);
+
+    // A long list is added a few tracks at a time, so the screen keeps moving: a Rekordbox track
+    // goes into the library when it is asked for, and that takes a moment each on the Pi. The
+    // queue's own count shows how far it has got. A whole list leaves out what is already queued.
+    struct Job {
+        QList<QPersistentModelIndex> rows;
+        int next = 0;
+        bool skipQueued = false;
+        QSet<TrackId> queued;
+        QPointer<QAbstractItemModel> model;
+    };
+    auto job = std::make_shared<Job>();
+    job->rows = rows;
+    job->skipQueued = what > 0;
+    job->model = pItemModel;
+    PlaylistDAO& playlistDao = m_pLibrary->trackCollectionManager()
+                                       ->internalCollection()
+                                       ->getPlaylistDAO();
+    if (job->skipQueued) {
+        const QList<TrackId> inQueue = playlistDao.getAutoDJTrackIds();
+        job->queued = QSet<TrackId>(inQueue.begin(), inQueue.end());
+    }
+    auto* pTimer = new QTimer(this);
+    pTimer->setInterval(0);
+    connect(pTimer, &QTimer::timeout, this, [this, pTimer, job]() {
+        auto* pModel = getTrackModel();
+        QElapsedTimer budget;
+        budget.start();
+        QList<TrackId> batch;
+        while (job->next < job->rows.size() && budget.elapsed() < 60) {
+            const QPersistentModelIndex index = job->rows.at(job->next++);
+            if (!pModel || !index.isValid() || model() != job->model) {
+                job->next = job->rows.size(); // the list was left or changed: stop here
+                break;
+            }
+            const TrackPointer pTrack = pModel->getTrack(index);
+            if (!pTrack || !pTrack->getId().isValid()) {
+                continue;
+            }
+            const TrackId id = pTrack->getId();
+            if (job->skipQueued && job->queued.contains(id)) {
+                continue;
+            }
+            job->queued.insert(id);
+            batch.append(id);
+        }
+        if (!batch.isEmpty()) {
+            m_pLibrary->trackCollectionManager()->unhideTracks(batch);
+            m_pLibrary->trackCollectionManager()
+                    ->internalCollection()
+                    ->getPlaylistDAO()
+                    .addTracksToAutoDJQueue(batch, PlaylistDAO::AutoDJSendLoc::BOTTOM);
+        }
+        if (job->next >= job->rows.size()) {
+            pTimer->stop();
+            pTimer->deleteLater();
+        }
+    });
+    pTimer->start();
 }
 
 namespace {

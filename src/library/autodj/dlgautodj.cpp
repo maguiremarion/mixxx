@@ -288,7 +288,7 @@ void DlgAutoDJ::applyKioskLayout() {
     pSteps->setColumnStretch(1, 1);
     const QStringList steps = {
             tr("Start a session."),
-            tr("Browse your music, tap a track and choose ADD TO AUTO DJ."),
+            tr("Browse your music, tap a track and choose Add This Track, or Add All Tracks in List."),
             tr("Sit back. The first track starts playing and the rest follow. Keep adding tracks, "
                "or tap one in the queue to take it out. End the session whenever you like."),
     };
@@ -319,10 +319,17 @@ void DlgAutoDJ::applyKioskLayout() {
 
     auto* pBarRow = new QHBoxLayout();
     pBarRow->setSpacing(8);
-    pBarRow->addWidget(makeLabel(tr("AUTO DJ"), "AutoDjBarTitle"));
-    auto* pLive = makeLabel(tr("ACTIVE"), "AutoDjLive");
+    // "ACTIVE" in green with what is queued under it
+    auto* pLiveColumn = new QVBoxLayout();
+    pLiveColumn->setSpacing(0);
+    auto* pLive = makeLabel(tr("AUTO DJ ACTIVE"), "AutoDjLive");
     pLive->setWordWrap(false);
-    pBarRow->addWidget(pLive);
+    pLiveColumn->addWidget(pLive);
+    m_pLiveLabel = makeLabel(QString(), "AutoDjCount");
+    m_pLiveLabel->setWordWrap(false);
+    pLiveColumn->addWidget(m_pLiveLabel);
+    pBarRow->addLayout(pLiveColumn);
+    pBarRow->addSpacing(28);
     pBarRow->addStretch(1);
     for (int beats : {8, 16, 32}) {
         QPushButton* pLength = makeButton(tr("%1").arg(beats), "AutoDjSegBtn");
@@ -341,29 +348,36 @@ void DlgAutoDJ::applyKioskLayout() {
     m_pOrderBtn = makeButton(tr("SMART ORDER"), "AutoDjBarBtn");
     m_pOrderBtn->setFixedSize(150, 40);
     pBarRow->addWidget(m_pOrderBtn);
-    pBarRow->addStretch(1);
+    // End session is a small thing of its own, well away from the actions
+    pBarRow->addStretch(2);
+    pBarRow->addSpacing(16);
     m_pEndBtn = makeButton(tr("END SESSION"), "AutoDjEndBtn");
-    m_pEndBtn->setFixedHeight(40);
+    // As wide as its longer text ("TAP AGAIN TO END"), so the second tap does not push the other
+    // controls over
+    m_pEndBtn->setFixedSize(150, 32);
     pBarRow->addWidget(m_pEndBtn);
     pSession->addLayout(pBarRow);
 
-    // What the two settings do, one line each
+    // What the two settings do, one line each, with some air above
+    pSession->addSpacing(10);
     auto* pBeatsHelp = makeLabel(
-            tr("BEATS: how long each blend lasts. 32 is about 15 seconds at 128 BPM."),
+            tr("BEATS: Sets how long each blend lasts. 32 is about 15 seconds at 128 BPM."),
             "AutoDjHelp");
     auto* pOrderHelp = makeLabel(
-            tr("SMART ORDER: puts the queue in an order where tempo and key change the least."),
+            tr("SMART ORDER: Puts the queue in an order where tempo and key change the least."),
             "AutoDjHelp");
     pBeatsHelp->setWordWrap(false);
     pOrderHelp->setWordWrap(false);
     pSession->addWidget(pBeatsHelp);
+    pSession->addSpacing(2);
     pSession->addWidget(pOrderHelp);
+    pSession->addSpacing(4);
 
     // --- shown instead of the (empty) queue
     // Three short lines, centred, instead of one paragraph that wraps with a lone word on its
     // last line
     m_pEmptyHint = makeLabel(tr("Your queue is empty.\n\n"
-                                "Browse to a track, tap it and choose ADD TO AUTO DJ.\n"
+                                "Browse to a track, tap it and choose Add This Track.\n"
                                 "The first track you add starts playing."),
             "AutoDjText");
     m_pEmptyHint->setWordWrap(false);
@@ -433,6 +447,22 @@ void DlgAutoDJ::updateSessionView() {
     m_pEmptyHint->setVisible(active && rows == 0);
     m_pTrackTableView->setVisible(active && rows > 0);
     m_pOrderBtn->setEnabled(rows > 2);
+    // How much is queued (it also shows how far a long list has got while it is being added)
+    if (rows == 0) {
+        m_pLiveLabel->setText(tr("0 TRACKS"));
+    } else {
+        QModelIndexList all;
+        all.reserve(rows);
+        for (int row = 0; row < rows; ++row) {
+            all.append(m_pAutoDJTableModel->index(row, 0));
+        }
+        const int minutes = static_cast<int>(
+                m_pAutoDJTableModel->getTotalDuration(all).toDoubleSeconds() / 60.0 + 0.5);
+        const QString length = minutes >= 60
+                ? tr("%1H %2M").arg(minutes / 60).arg(minutes % 60)
+                : tr("%1M").arg(minutes);
+        m_pLiveLabel->setText(tr("%n TRACK(S)", "", rows) + QStringLiteral("  -  ") + length);
+    }
     if (!active) {
         m_endArmed = false;
         m_pEndBtn->setText(tr("END SESSION"));

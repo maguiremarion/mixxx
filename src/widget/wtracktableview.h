@@ -169,11 +169,12 @@ class WTrackTableView : public WLibraryTableView {
     void slotRowClicked(const QModelIndex& index);
     void showLoadPopup();
     void showAutoDJSessionPopup();
-    void addSelectedToAutoDJSession();
+    void addToAutoDJSession(int what);
     void showRecordingPopup();
     bool isLoadBlockedByPlayingDeck(const QString& group) const;
 
   protected:
+    void hideEvent(QHideEvent* pEvent) override;
     QString getModelStateKey() const override;
 
   private:

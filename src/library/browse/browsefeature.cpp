@@ -554,8 +554,7 @@ QString BrowseFeature::getRootViewHtml() const {
             : tr("Browse items on this device and connected drives to find tracks that aren't stored in a Rekordbox or Serato library format.");
     const QString detail = kiosk
             ? tr("Plug in a drive, open \"Removable Devices\" on the left and pick a folder. "
-                 "If a drive doesn't show up, tap REFRESH DRIVES. Tracks you load from here are "
-                 "saved to your library.")
+                 "Tracks you load from here are saved to your library.")
             : tr("Local files, downloads, and drives that weren't exported from DJ software can be found here. Track loaded"
                  "from here are saved to your device's library.");
 
@@ -563,6 +562,9 @@ QString BrowseFeature::getRootViewHtml() const {
     html.append(QString("<h1>%1</h1>").arg(title));
     html.append(QString("<p style=\"font-size:20px;\">%1</p>").arg(summary));
     html.append(QString("<p style=\"font-size:17px; color:#8c8c94;\">%1</p>").arg(detail));
+    if (kiosk) {
+        html.append(WLibraryTextBrowser::refreshDrivesSectionHtml());
+    }
     return html;
 }
 

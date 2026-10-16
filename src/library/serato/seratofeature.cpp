@@ -985,6 +985,7 @@ QString SeratoFeature::formatRootViewHtml() const {
     html.append(QString("<h1>%1</h1>").arg(title));
     html.append(QString("<p style=\"font-size:20px;\">%1</p>").arg(summary));
     html.append(QString("<p style=\"font-size:17px; color:#8c8c94;\">%1</p>").arg(detail));
+    html.append(WLibraryTextBrowser::refreshDrivesSectionHtml());
     return html;
 }
 

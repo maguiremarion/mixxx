@@ -92,6 +92,7 @@ class DlgAutoDJ : public QWidget, public Ui::DlgAutoDJ, public LibraryView {
     QPointer<QWidget> m_pIntroPage;
     QPointer<QWidget> m_pSessionBar;
     QPointer<QLabel> m_pEmptyHint;
+    QPointer<QLabel> m_pLiveLabel; // "ACTIVE", then how many tracks are queued and for how long
     QPointer<QLabel> m_pQueueCaption;
     QPointer<QPushButton> m_pOrderBtn;
     QPointer<QPushButton> m_pEndBtn;
