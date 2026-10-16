@@ -1,11 +1,16 @@
 #include "controllers/dlgprefcontrollers.h"
 
 #include <QFrame>
+#include <QListWidget>
+#include <QScroller>
+#include <QDialog>
+#include <QPushButton>
 #include <QLabel>
 #include <QVBoxLayout>
 #include "control/controlproxy.h"
 #include "controllers/controller.h"
 #include "controllers/controllermanager.h"
+#include "controllers/controllermappinginfoenumerator.h"
 #include "controllers/defs_controllers.h"
 #include "controllers/dlgprefcontroller.h"
 #include "defs_urls.h"
@@ -37,6 +42,10 @@ DlgPrefControllers::DlgPrefControllers(DlgPreferences* pPreferences,
     setupControllerWidgets();
 
     connect(btnOpenUserMappings, &QPushButton::clicked, this, [this]() {
+        if (DlgPreferences::kioskMode()) {
+            showKioskMappingList();
+            return;
+        }
         QString mappingsPath = userMappingsPath(m_pConfig);
         openLocalFile(mappingsPath);
     });
@@ -137,8 +146,9 @@ void DlgPrefControllers::applyKioskLayout() {
     pLayout->addWidget(makeText(tr("Controllers"), "PageHeading", pContent));
     pLayout->addSpacing(6);
     txtControllersOverview->setText(tr(
-            "Plug a DJ controller into a USB port and it appears under \"Controllers\" in "
-            "the list on the left. Select it there to switch it on and choose its mapping."));
+            "Plug a DJ controller into a USB port and it will appear under \"Controllers\" in "
+            "the list on the left. Select it to choose its mapping and set it as the "
+            "controller to use."));
     txtControllersOverview->setObjectName(QStringLiteral("PageText"));
     pLayout->addWidget(txtControllersOverview);
     pLayout->addSpacing(22);
@@ -149,12 +159,16 @@ void DlgPrefControllers::applyKioskLayout() {
     auto* pNoneLayout = new QVBoxLayout(pNoneCard);
     pNoneLayout->setContentsMargins(20, 16, 20, 16);
     txtNoControllersAvailable->setText(tr(
-            "No controller detected. Plug one in, then restart the app."));
+            "No controller detected. Plug one into a USB port and it will appear here."));
     txtNoControllersAvailable->setObjectName(QStringLiteral("PageNotice"));
     txtNoControllersAvailable->setStyleSheet(QString());
     txtNoControllersAvailable->setFont(QFont());
     pNoneLayout->addWidget(txtNoControllersAvailable);
     m_pNoControllersCard = pNoneCard;
+    // This runs after the first look for controllers: show the card only when none was found
+    // (it used to stay up empty when one had been, a grey box above the mapping files).
+    pNoneCard->setVisible(m_noControllersFound);
+    txtNoControllersAvailable->setVisible(m_noControllersFound);
     pLayout->addWidget(pNoneCard);
     pLayout->addSpacing(14);
 
@@ -166,11 +180,10 @@ void DlgPrefControllers::applyKioskLayout() {
     pFilesLayout->addWidget(makeText(tr("MAPPING FILES"), "SectionLabel", pFilesCard));
     txtMappingsOverview->setText(tr(
             "A mapping tells the player what each button, knob and fader on a controller "
-            "does. To add one, put its .xml and .js files in the mapping files folder, then "
-            "press the reload button next to the Mapping list on the controller's page."));
+            "does. You pick the one for your controller on its own page."));
     txtMappingsOverview->setObjectName(QStringLiteral("PageText"));
     pFilesLayout->addWidget(txtMappingsOverview);
-    btnOpenUserMappings->setText(tr("See available mapping files"));
+    btnOpenUserMappings->setText(tr("See available mappings"));
     btnOpenUserMappings->setFixedHeight(52);
     pFilesLayout->addWidget(btnOpenUserMappings, 0, Qt::AlignLeft);
     pLayout->addWidget(pFilesCard);
@@ -185,6 +198,57 @@ void DlgPrefControllers::applyKioskLayout() {
     gridLayout_3->setContentsMargins(0, 0, 0, 0);
     gridLayout_3->addWidget(pContent, 3, 0);
     gridLayout_3->setRowStretch(3, 1);
+}
+
+/// The mappings the player knows, as a plain list that scrolls with a finger: they can be looked at,
+/// but nothing on the file system can be opened from here.
+void DlgPrefControllers::showKioskMappingList() {
+    QStringList names;
+    for (const auto& pEnumerator : {m_pControllerManager->getMainThreadUserMappingEnumerator(),
+                 m_pControllerManager->getMainThreadSystemMappingEnumerator()}) {
+        if (pEnumerator.isNull()) {
+            continue;
+        }
+        const QList<MappingInfo> mappings =
+                pEnumerator->getMappingsByExtension(MIDI_MAPPING_EXTENSION);
+        for (const MappingInfo& mapping : mappings) {
+            if (!names.contains(mapping.getName())) {
+                names.append(mapping.getName());
+            }
+        }
+    }
+    names.sort(Qt::CaseInsensitive);
+
+    QDialog dialog(window());
+    auto* pLayout = new QVBoxLayout(&dialog);
+    pLayout->setContentsMargins(24, 20, 24, 20);
+    pLayout->setSpacing(14);
+    auto* pTitle = new QLabel(tr("Available mappings"), &dialog);
+    pTitle->setObjectName(QStringLiteral("PageHeading"));
+    pLayout->addWidget(pTitle);
+    auto* pList = new QListWidget(&dialog);
+    pList->setSelectionMode(QAbstractItemView::NoSelection);
+    pList->setFocusPolicy(Qt::NoFocus);
+    pList->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    pList->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    pList->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pList->setTextElideMode(Qt::ElideMiddle);
+    pList->setMinimumHeight(300);
+    for (const QString& name : std::as_const(names)) {
+        pList->addItem(name);
+    }
+    if (names.isEmpty()) {
+        pList->addItem(tr("No mappings found"));
+    }
+    // a finger dragged over the list scrolls it
+    QScroller::grabGesture(pList->viewport(), QScroller::LeftMouseButtonGesture);
+    pLayout->addWidget(pList, 1);
+    auto* pClose = new QPushButton(tr("Close"), &dialog);
+    pClose->setFixedHeight(52);
+    connect(pClose, &QPushButton::clicked, &dialog, &QDialog::accept);
+    pLayout->addWidget(pClose, 0, Qt::AlignRight);
+    dialog.setMinimumWidth(560);
+    dialog.exec();
 }
 
 void DlgPrefControllers::openLocalFile(const QString& file) {
@@ -277,6 +341,7 @@ void DlgPrefControllers::setupControllerWidgets() {
             return pController->getDataRepresentationProtocol() != DataRepresentationProtocol::MIDI;
         });
     }
+    m_noControllersFound = controllerList.isEmpty();
     if (controllerList.isEmpty()) {
         // If no controllers are available, show the "No controllers available" message.
         txtNoControllersAvailable->setVisible(true);

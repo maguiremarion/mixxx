@@ -1070,6 +1070,7 @@ void DlgPreferences::setVisible(bool visible) {
         // A wider page list: "Controllers > DDJ-FLX2 ..." and "Sound Hardware" were cut off.
         constexpr int kKioskPageListWidth = 260;
         contentsTreeWidget->setMinimumWidth(kKioskPageListWidth);
+        contentsTreeWidget->setIconSize(QSize(28, 28)); // the page list's icons a little larger
         splitter->setSizes({kKioskPageListWidth, std::max(400, width() - kKioskPageListWidth)});
     }
     QDialog::setVisible(visible);

@@ -159,7 +159,8 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
         pCardRow->addWidget(m_pIntro, 1);
         buttonsHLayout->removeWidget(queryButton);
         queryButton->setParent(pCard);
-        queryButton->setText(tr("Refresh Devices"));
+        // two spaces: the gap between a button's icon and its text cannot be set any other way
+        queryButton->setText(QStringLiteral("  ") + tr("Refresh Devices"));
         queryButton->setIcon(DlgPreferences::whiteIcon(QStringLiteral(
                 ":/images/preferences/light/ic_preferences_controllers_reload.svg")));
         queryButton->setIconSize(QSize(26, 26));

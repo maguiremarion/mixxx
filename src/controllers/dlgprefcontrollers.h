@@ -52,6 +52,8 @@ class DlgPrefControllers : public DlgPreferencePage, public Ui::DlgPrefControlle
 
   private:
     void applyKioskLayout();
+    void showKioskMappingList();
+    bool m_noControllersFound = true;
     QWidget* m_pNoControllersCard = nullptr;
     void destroyControllerWidgets();
     void setupControllerWidgets();
