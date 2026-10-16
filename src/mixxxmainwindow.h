@@ -190,6 +190,12 @@ class MixxxMainWindow : public QMainWindow {
     VolumeWatcher* m_pVolumeWatcher = nullptr;
     std::unique_ptr<ControlPushButton> m_pAutoRescanOnVolumeChange;
     bool m_rescanPending = false;
+    // Linux: the list of sound cards last seen, and whether a "no audio output" box is up
+    QString m_soundCards;
+    QString m_soundCardsPending;
+    bool m_noOutputBoxOpen = false;
+    // Waits a moment after the screens change before the window is put right (see initialize())
+    QPointer<QTimer> m_pScreenSettle;
     parented_ptr<DlgKeywheel> m_pKeywheel;
 
 #ifdef __ENGINEPRIME__

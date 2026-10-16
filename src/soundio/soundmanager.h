@@ -43,6 +43,9 @@ class SoundManager : public QObject {
 
     // Creates a list of sound devices
     void clearAndQueryDevices();
+    // Like clearAndQueryDevices(), without the five second wait after closing a device (the wait
+    // is for PulseAudio; here the hardware may just have been unplugged and we should not freeze).
+    void rescanHardware();
     void queryDevices();
 
     // Opens all the devices chosen by the user in the preferences dialog, and

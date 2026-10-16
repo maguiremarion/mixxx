@@ -214,6 +214,12 @@ class KioskDropDownFilter : public QObject {
     bool eventFilter(QObject* pObj, QEvent* pEvent) override {
         switch (pEvent->type()) {
         case QEvent::Polish:
+            // Pop-ups and dialogs have no title bar and no close button: whoever is asked
+            // something answers with the dialog's own buttons (Escape still closes it). Set before
+            // the window is first shown.
+            if (auto* pDialog = qobject_cast<QDialog*>(pObj)) {
+                pDialog->setWindowFlag(Qt::FramelessWindowHint, true);
+            }
             if (auto* pCombo = qobject_cast<QComboBox*>(pObj)) {
                 pCombo->setMaxVisibleItems(5);
                 pCombo->setItemDelegate(new FlatListDelegate(pCombo));

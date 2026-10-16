@@ -121,6 +121,18 @@ PortMidiEnumerator::~PortMidiEnumerator() {
     }
 }
 
+void PortMidiEnumerator::prepareRescan() {
+    m_retiredDevices += m_devices;
+    m_devices.clear();
+    // PortMidi reads the system's MIDI ports when it starts, so start it again to see a port that
+    // appeared since. Every controller is closed by now.
+    Pm_Terminate();
+    PmError err = Pm_Initialize();
+    if (err != pmNoError) {
+        qWarning() << "PortMidi error:" << Pm_GetErrorText(err);
+    }
+}
+
 bool shouldLinkInputToOutput(const QString& input_name,
         const QString& output_name) {
     // Early exit.
@@ -184,11 +196,9 @@ QList<Controller*> PortMidiEnumerator::queryDevices() {
 
     int iNumDevices = Pm_CountDevices();
 
-    QListIterator<Controller*> dev_it(m_devices);
-    while (dev_it.hasNext()) {
-        delete dev_it.next();
-    }
-
+    // Anything still listed from an earlier scan is retired, not deleted: its pointer may still be
+    // held (by a Preferences page) until the lists are rebuilt.
+    m_retiredDevices += m_devices;
     m_devices.clear();
 
     const PmDeviceInfo* inputDeviceInfo = nullptr;

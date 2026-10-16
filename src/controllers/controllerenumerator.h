@@ -18,4 +18,15 @@ class ControllerEnumerator : public QObject {
     virtual ~ControllerEnumerator();
 
     virtual QList<Controller*> queryDevices() = 0;
+
+    /// Called (with every controller closed) before queryDevices() runs again after start-up, to
+    /// pick up a controller plugged in since. Retires the Controllers found so far (they are kept,
+    /// closed, until the app ends, so a pointer someone still holds never dangles) and, where the
+    /// host API only looks at start-up, restarts it.
+    virtual void prepareRescan() {
+    }
+
+  protected:
+    /// Controllers from an earlier scan, closed and no longer listed.
+    QList<Controller*> m_retiredDevices;
 };

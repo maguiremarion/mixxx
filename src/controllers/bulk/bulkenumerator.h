@@ -12,6 +12,7 @@ class BulkEnumerator : public ControllerEnumerator {
     virtual ~BulkEnumerator();
 
     QList<Controller*> queryDevices() override;
+    void prepareRescan() override;
 
   private:
     QList<Controller*> m_devices;

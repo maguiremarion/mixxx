@@ -1,5 +1,6 @@
 #include "controllers/controllermanager.h"
 
+#include <QDir>
 #include <QSet>
 #include <QThread>
 
@@ -99,6 +100,7 @@ ControllerManager::ControllerManager(UserSettingsPointer pConfig)
           m_pControllerLearningEventFilter(
                   std::make_unique<ControllerLearningEventFilter>()),
           m_pollTimer(this),
+          m_hotplugTimer(this),
           m_pThread(std::make_unique<QThread>()),
           m_skipPoll(false) {
     qRegisterMetaType<std::shared_ptr<LegacyControllerMapping>>(
@@ -130,6 +132,11 @@ ControllerManager::ControllerManager(UserSettingsPointer pConfig)
             this,
             &ControllerManager::slotSetUpDevices);
     connect(this, &ControllerManager::requestShutdown, this, &ControllerManager::slotShutdown);
+    connect(this,
+            &ControllerManager::requestRescanDevices,
+            this,
+            &ControllerManager::slotRescanDevices);
+    connect(&m_hotplugTimer, &QTimer::timeout, this, &ControllerManager::slotCheckHotplug);
 
     // Signal that we should run slotInitialize once our event loop has started
     // up. invokeMethod with QueuedConnection will post an event to our event loop,
@@ -183,6 +190,14 @@ void ControllerManager::slotInitialize() {
         m_enumerators.push_back(std::make_unique<HidEnumerator>());
 #endif
     } // Mutex locker released here
+#ifdef Q_OS_LINUX
+    // Watch for a controller plugged in (or out) later: its MIDI port shows up in /dev/snd.
+    m_hotplugSignature = QDir(QStringLiteral("/dev/snd"))
+                                 .entryList({QStringLiteral("midiC*")}, QDir::System)
+                                 .join(QLatin1Char(','));
+    m_hotplugPending = m_hotplugSignature;
+    m_hotplugTimer.start(1500);
+#endif
     emit initialized();
 }
 
@@ -333,6 +348,52 @@ void ControllerManager::slotSetUpDevices() {
     }
 
     pollIfAnyControllersOpen();
+}
+
+void ControllerManager::slotCheckHotplug() {
+    DEBUG_ASSERT_THIS_QOBJECT_THREAD_AFFINITY();
+    const QString signature = QDir(QStringLiteral("/dev/snd"))
+                                      .entryList({QStringLiteral("midiC*")}, QDir::System)
+                                      .join(QLatin1Char(','));
+    if (signature == m_hotplugSignature) {
+        m_hotplugPending = signature;
+        return;
+    }
+    // A port came or went. Wait for one more check with the same list (a new device is not
+    // usable the instant its node appears), then look for controllers again.
+    if (signature != m_hotplugPending) {
+        m_hotplugPending = signature;
+        return;
+    }
+    qDebug() << "ControllerManager: MIDI ports changed, scanning for controllers again";
+    m_hotplugSignature = signature;
+    slotRescanDevices();
+}
+
+void ControllerManager::slotRescanDevices() {
+    DEBUG_ASSERT_THIS_QOBJECT_THREAD_AFFINITY();
+    qDebug() << "ControllerManager: rescanning for controllers";
+
+    // Close what is open (no change to the saved on/off setting): the enumerators are about to
+    // look again and the controllers are made anew.
+    auto locker = lockMutex(&m_mutex);
+    const QList<Controller*> controllers = m_controllers;
+    std::vector<ControllerEnumerator*> enumerators;
+    for (const auto& pEnumerator : m_enumerators) {
+        enumerators.push_back(pEnumerator.get());
+    }
+    locker.unlock();
+    for (Controller* pController : controllers) {
+        if (pController->isOpen()) {
+            pController->close();
+        }
+    }
+    stopPolling();
+    for (ControllerEnumerator* pEnumerator : enumerators) {
+        pEnumerator->prepareRescan();
+    }
+    // Then like at start-up: list them, open the ones that are switched on and have a mapping.
+    slotSetUpDevices();
 }
 
 void ControllerManager::pollIfAnyControllersOpen() {

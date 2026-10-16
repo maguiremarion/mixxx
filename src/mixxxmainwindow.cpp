@@ -24,6 +24,8 @@
 
 #ifdef MIXXX_USE_QOPENGL
 #include <QGuiApplication>
+#include <QScreen>
+#include <QWindow>
 
 #include "widget/wnotice.h"
 #include "widget/tooltipqopengl.h"
@@ -290,6 +292,59 @@ void MixxxMainWindow::initialize() {
             // could be we're fullscreen already after setGeomtery(previousGeometry)
             !isFullScreen()) {
         showFullScreen();
+    }
+
+    // The display can drop out for a moment (plugging a USB device on the Pi can make the HDMI
+    // screen re-detect). Qt then moves the window to a stand-in screen of another size, and after
+    // the real screen returns the full-screen window stays that size: the picture is cut off and
+    // stretched. When the screens change, ask for full screen on the real one again.
+    if (CmdlineArgs::Instance().getStartInFullscreen() || fullscreenPref) {
+        auto* pScreenSettle = new QTimer(this);
+        m_pScreenSettle = pScreenSettle;
+        pScreenSettle->setSingleShot(true);
+        pScreenSettle->setInterval(800);
+        connect(pScreenSettle, &QTimer::timeout, this, [this]() {
+            QScreen* pScreen = QGuiApplication::primaryScreen();
+            if (!pScreen || !windowHandle()) {
+                return;
+            }
+            qInfo() << "Screens changed: putting the window full screen on" << pScreen->name()
+                    << pScreen->geometry() << "window was" << geometry();
+            for (QWidget* pTop : QApplication::topLevelWidgets()) {
+                if (pTop->isVisible()) {
+                    qInfo() << "  open window:" << pTop->metaObject()->className()
+                            << pTop->geometry() << (pTop->isModal() ? "modal" : "");
+                }
+            }
+            // While a box or Preferences is up, leave everything alone and look again in a moment:
+            // putting the main window back now would stack it over that box, and whoever waits on
+            // the box would be stuck. The window is put right once the last one has closed.
+            if (QWidget* pModal = QApplication::activeModalWidget()) {
+                qInfo() << "  a dialog is open (" << pModal->metaObject()->className()
+                        << "), putting the window right when it closes";
+                pModal->raise();
+                pModal->activateWindow();
+                m_pScreenSettle->start();
+                return;
+            }
+            // Take the window off the screen and show it full screen again, so the compositor sizes
+            // it afresh for the real screen (a plain full screen toggle left it at the size of the
+            // stand-in screen Qt made while the display was gone).
+            windowHandle()->setScreen(pScreen);
+            hide();
+            QTimer::singleShot(300, this, [this]() {
+                showFullScreen();
+                QTimer::singleShot(700, this, [this]() {
+                    qInfo() << "Window after the screen change:" << geometry() << windowState();
+                });
+            });
+        });
+        const auto restart = [pScreenSettle]() {
+            pScreenSettle->start();
+        };
+        connect(qApp, &QGuiApplication::screenAdded, pScreenSettle, restart);
+        connect(qApp, &QGuiApplication::screenRemoved, pScreenSettle, restart);
+        connect(qApp, &QGuiApplication::primaryScreenChanged, pScreenSettle, restart);
     }
 
     initializationProgressUpdate(65, tr("skin"));
@@ -617,8 +672,23 @@ void MixxxMainWindow::initialize() {
     do {
         retryClicked = false;
         SoundDeviceStatus result = m_pCoreServices->getSoundManager()->setupDevices();
-        if (result == SoundDeviceStatus::ErrorDeviceCount ||
-                result == SoundDeviceStatus::ErrorExcessiveOutputChannel) {
+        const bool outputOpen =
+                ControlObject::get(ConfigKey(QStringLiteral("[SoundManager]"),
+                        QStringLiteral("status"))) >= SOUNDMANAGER_CONNECTED;
+        if (result == SoundDeviceStatus::ErrorDeviceCount) {
+            // A saved device is not there (the deck is not plugged in). When an output did open
+            // that is fine; when none did, it is the same plain question as with no output set up.
+            if (!outputOpen) {
+                bool continueClicked = false;
+                m_noOutputBoxOpen = true;
+                const bool accepted = noOutputDlg(&continueClicked) == QDialog::Accepted;
+                m_noOutputBoxOpen = false;
+                if (!accepted) {
+                    exit(0);
+                }
+                retryClicked = !continueClicked; // sound settings were changed: set up again
+            }
+        } else if (result == SoundDeviceStatus::ErrorExcessiveOutputChannel) {
             if (soundDeviceBusyDlg(&retryClicked) != QDialog::Accepted) {
                 exit(0);
             }
@@ -653,6 +723,65 @@ void MixxxMainWindow::initialize() {
     // The user has either reconfigured devices or accepted no outputs,
     // so it's now safe to write the new config to disk.
     m_pCoreServices->getSoundManager()->getConfig().writeToDisk();
+
+#ifdef Q_OS_LINUX
+    // Watch the sound cards: when a deck is unplugged (or its connection is lost) the sound stops,
+    // and when one is plugged in again it should start by itself. Every two seconds the list of
+    // cards is read; a change that holds for two reads makes the player look at its sound devices
+    // again. If no output can be opened then, the "no audio output" box comes up again.
+    {
+        const auto readCards = []() {
+            QFile cards(QStringLiteral("/proc/asound/cards"));
+            if (!cards.open(QIODevice::ReadOnly)) {
+                return QString();
+            }
+            return QString::fromUtf8(cards.readAll());
+        };
+        m_soundCards = readCards();
+        m_soundCardsPending = m_soundCards;
+        auto* pSoundWatch = new QTimer(this);
+        pSoundWatch->setInterval(2000);
+        connect(pSoundWatch, &QTimer::timeout, this, [this, readCards]() {
+            const QString cards = readCards();
+            if (cards == m_soundCards) {
+                m_soundCardsPending = cards;
+                return;
+            }
+            if (cards != m_soundCardsPending) {
+                m_soundCardsPending = cards; // wait for one more read with the same list
+                return;
+            }
+            if (m_noOutputBoxOpen) {
+                return; // the box is up: it is picked up again after it closes
+            }
+            m_soundCards = cards;
+            qInfo() << "Sound cards changed, looking at the sound devices again";
+            auto pSoundManager = m_pCoreServices->getSoundManager();
+            pSoundManager->rescanHardware();
+            pSoundManager->setupDevices();
+            const bool outputOpen =
+                    ControlObject::get(ConfigKey(QStringLiteral("[SoundManager]"),
+                            QStringLiteral("status"))) >= SOUNDMANAGER_CONNECTED;
+            if (outputOpen || pSoundManager->pipewireSkipConfig()) {
+                return;
+            }
+            bool continueClicked = false;
+            m_noOutputBoxOpen = true;
+            const bool accepted = noOutputDlg(&continueClicked) == QDialog::Accepted;
+            m_noOutputBoxOpen = false;
+            if (!accepted) {
+                return;
+            }
+            // Re-read the cards: the box may have taken a while and a deck may have come since
+            m_soundCards = readCards();
+            m_soundCardsPending = m_soundCards;
+            if (!continueClicked) {
+                pSoundManager->setupDevices();
+            }
+        });
+        pSoundWatch->start();
+    }
+#endif
 
     // Keep the logo up while the skin appears: replacing the launch image shows a black window
     // with half-drawn widgets for a couple of seconds while the waveform windows initialise.
@@ -1109,7 +1238,9 @@ QDialog::DialogCode MixxxMainWindow::noOutputDlg(bool* continueClicked) {
     msgBox.setWindowTitle(tr("No audio output"));
     // Just say what is wrong; the buttons say what can be done about it.
     msgBox.setText(tr("No audio output is configured."));
-    msgBox.setInformativeText(tr("Plug in your audio device or controller, or pick an output."));
+    msgBox.setInformativeText(
+            tr("If this is your first time, or you haven't connected your deck yet, connect it, "
+               "then open Sound settings and assign it as the output."));
 
     QPushButton* continueButton =
             msgBox.addButton(tr("Continue without audio"), QMessageBox::ActionRole);
@@ -1601,17 +1732,18 @@ void MixxxMainWindow::slotHelpAbout() {
 }
 
 void MixxxMainWindow::slotLibraryScanSummaryDlg(const LibraryScanResultSummary& result) {
+    // The scan runs, but it never reports: a box saying "7 tracks restored, 9 total available" means
+    // nothing to someone playing, so no scan shows one (start-up, drive changes, RESCAN LIBRARY).
+    // The RESCAN LIBRARY button still shows SCANNING... while it works.
     if (!m_pCoreServices->getSettings()->getValue<bool>(
-                mixxx::library::prefs::kShowScanSummaryConfigKey, true)) {
+                mixxx::library::prefs::kShowScanSummaryConfigKey, false)) {
         return;
     }
 
-    // Don't show the report dialog when the scan is run during startup and no
-    // noteworthy changes have been detected.
-    if (result.autoscan &&
-            result.numNewTracks == 0 &&
-            result.numNewMissingTracks == 0 &&
-            result.numRediscoveredTracks == 0) {
+    // A scan Mixxx started by itself (at start-up, or when a drive came or went) reports nothing:
+    // a box saying "2 tracks found" before the player is even on screen only gets in the way.
+    // The RESCAN LIBRARY button still shows its summary.
+    if (result.autoscan) {
         return;
     }
 

@@ -53,8 +53,17 @@ static bool is_interesting(const uint16_t idVendor, const uint16_t idProduct) {
             });
 }
 
+void BulkEnumerator::prepareRescan() {
+    m_retiredDevices += m_devices;
+    m_devices.clear();
+}
+
 QList<Controller*> BulkEnumerator::queryDevices() {
     qDebug() << "Scanning USB Bulk devices:";
+
+    // A second scan must not list the first one's devices again.
+    m_retiredDevices += m_devices;
+    m_devices.clear();
 #ifdef __ANDROID__
     QJniObject context = QNativeInterface::QAndroidApplication::context();
     QJniObject USB_SERVICE =

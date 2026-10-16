@@ -247,10 +247,11 @@ void SoundManager::clearDeviceList(bool sleepAfterClosing) {
     // Empty out the list of devices we currently have.
     m_pErrorDevice.clear();
 
-    // deinitialize in case of PortAudio so the devices are updated
-    if (isPipewireSelected()) {
-        m_pEnumerator->deinitialize();
-    }
+    // Shut the audio system down so queryDevices() starts it again and the list is read afresh.
+    // PortAudio (ALSA) only looks for hardware when it starts: without this, "Refresh Devices"
+    // kept showing the devices that were there at launch and a device plugged in later never
+    // appeared.
+    m_pEnumerator->deinitialize();
 }
 
 QList<mixxx::audio::SampleRate> SoundManager::getSampleRates(const QString& api) const {
@@ -282,6 +283,12 @@ void SoundManager::queryDevices() {
 
 void SoundManager::clearAndQueryDevices() {
     const bool sleepAfterClosing = true;
+    clearDeviceList(sleepAfterClosing);
+    queryDevices();
+}
+
+void SoundManager::rescanHardware() {
+    const bool sleepAfterClosing = false;
     clearDeviceList(sleepAfterClosing);
     queryDevices();
 }

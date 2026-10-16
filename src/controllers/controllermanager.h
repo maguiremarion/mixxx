@@ -43,12 +43,17 @@ class ControllerManager : public QObject {
     /// Prevent other parts of Mixxx from having to manually connect to our slots
     void setUpDevices() { emit requestSetUpDevices(); };
 
+    /// Look for controllers again (one plugged in since start-up) and open the enabled ones, like
+    /// at start-up. Also runs by itself when a MIDI port appears or goes (Linux).
+    void rescanDevices() { emit requestRescanDevices(); };
+
     static QList<QString> getMappingPaths(UserSettingsPointer pConfig);
 
   signals:
     void initialized();
     void devicesChanged();
     void requestSetUpDevices();
+    void requestRescanDevices();
     void requestShutdown();
     void requestInitialize();
     void mappingApplied(bool applied);
@@ -67,6 +72,10 @@ class ControllerManager : public QObject {
     /// preferences dialog on apply, and only open/close changed devices
     void slotSetUpDevices();
     void slotShutdown();
+    /// Closes every controller, makes the enumerators look again and sets the devices up.
+    void slotRescanDevices();
+    /// Linux: has a MIDI port appeared or gone?
+    void slotCheckHotplug();
     /// Calls poll() on all devices that have isPolling() true.
     void slotPollDevices();
 
@@ -83,6 +92,9 @@ class ControllerManager : public QObject {
     // because the CM is moved to its own thread and runs its own event loop.
     std::unique_ptr<ControllerLearningEventFilter> m_pControllerLearningEventFilter;
     QTimer m_pollTimer;
+    QTimer m_hotplugTimer;
+    QString m_hotplugSignature;
+    QString m_hotplugPending;
     mutable QMutex m_mutex;
     /// Guarded by m_mutex for main-thread reads.
     /// Written/iterated only on the ControllerManager thread

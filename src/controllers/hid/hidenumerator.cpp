@@ -125,8 +125,17 @@ HidEnumerator::~HidEnumerator() {
     hid_exit();
 }
 
+void HidEnumerator::prepareRescan() {
+    m_retiredDevices += m_devices;
+    m_devices.clear();
+}
+
 QList<Controller*> HidEnumerator::queryDevices() {
     qInfo() << "Scanning USB HID devices";
+
+    // A second scan must not list the first one's devices again.
+    m_retiredDevices += m_devices;
+    m_devices.clear();
 
 #ifdef __ANDROID__
     QJniObject context = QNativeInterface::QAndroidApplication::context();
