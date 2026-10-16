@@ -72,6 +72,8 @@ Library::Library(
           m_pTrackCollectionManager(pTrackCollectionManager),
           m_pSidebarModel(make_parented<SidebarModel>(this)),
           m_pLibraryControl(make_parented<LibraryControl>(this)),
+          m_pSearchEnabled(std::make_unique<ControlObject>(
+                  ConfigKey(QStringLiteral("[Library]"), QStringLiteral("search_enabled")))),
           m_pLibraryWidget(nullptr),
           m_pKeyNotation(std::make_unique<ControlObject>(
                   mixxx::library::prefs::kKeyNotationConfigKey, false)) {

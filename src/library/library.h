@@ -203,6 +203,9 @@ class Library: public QObject {
 
     parented_ptr<SidebarModel> m_pSidebarModel;
     parented_ptr<LibraryControl> m_pLibraryControl;
+    // [Library],search_enabled: 0 on the pages that have nothing to search (the search box then
+    // shows "- - -"), so the skin can hide the box and give its row to the page
+    std::unique_ptr<ControlObject> m_pSearchEnabled;
 
     QList<LibraryFeature*> m_features;
     // (sidebar id, feature) of every feature, until buildSidebar() decides what to list

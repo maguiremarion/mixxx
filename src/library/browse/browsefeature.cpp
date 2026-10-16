@@ -14,6 +14,7 @@
 #include "library/trackcollectionmanager.h"
 #include "library/treeitem.h"
 #include "moc_browsefeature.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "widget/wlibrary.h"
 #include "widget/wlibrarysidebar.h"
 #include "widget/wlibrarytextbrowser.h"
@@ -108,7 +109,13 @@ BrowseFeature::BrowseFeature(
     // The invisible root item of the child model
     std::unique_ptr<TreeItem> pRootItem = TreeItem::newRoot(this);
 
-    m_pQuickLinkItem = pRootItem->appendChild(tr("Quick Links"), QUICK_LINK_NODE);
+    // In the kiosk "Computer" lists only the plugged-in drives: no Quick Links, no "/" (nobody
+    // needs the system's own folders there).
+    const bool kiosk = DlgPreferences::kioskMode();
+    m_pQuickLinkItem = nullptr;
+    if (!kiosk) {
+        m_pQuickLinkItem = pRootItem->appendChild(tr("Quick Links"), QUICK_LINK_NODE);
+    }
 
     // Create the 'devices' shortcut
 #if defined(__WINDOWS__)
@@ -143,7 +150,9 @@ BrowseFeature::BrowseFeature(
     pRootItem->appendChild(tr("Removable Devices"), DEVICE_NODE);
 
     // show root directory on Linux.
-    pRootItem->appendChild(QDir::rootPath(), QDir::rootPath());
+    if (!kiosk) {
+        pRootItem->appendChild(QDir::rootPath(), QDir::rootPath());
+    }
 #endif
 
     // Just a word about how the TreeItem objects are used for the BrowseFeature:
@@ -161,6 +170,9 @@ BrowseFeature::BrowseFeature(
     loadQuickLinks();
 
     for (const QString& quickLinkPath : std::as_const(m_quickLinkList)) {
+        if (!m_pQuickLinkItem) {
+            break;
+        }
         QString name = extractNameFromPath(quickLinkPath);
         qDebug() << "Appending Quick Link: " << name << "---" << quickLinkPath;
         m_pQuickLinkItem->appendChild(name, quickLinkPath);
@@ -178,6 +190,9 @@ QVariant BrowseFeature::title() {
 }
 
 void BrowseFeature::slotAddQuickLink() {
+    if (!m_pQuickLinkItem) {
+        return;
+    }
     const QString path = getLastRightClickedPath();
     if (path.isEmpty()) {
         return;
@@ -235,6 +250,9 @@ void BrowseFeature::slotLibraryScanFinished() {
 }
 
 void BrowseFeature::slotRemoveQuickLink() {
+    if (!m_pQuickLinkItem) {
+        return;
+    }
     const QString path = getLastRightClickedPath();
     if (path.isEmpty()) {
         return;
@@ -528,11 +546,18 @@ QString BrowseFeature::getRootViewHtml() const {
     // Same shape as the Rekordbox / Serato start pages: short and big for a small touchscreen,
     // and saying what this view is for: music that is not in a Rekordbox or Serato library.
     const QString title = tr("Computer");
-    const QString summary = tr(
-            "Browse items on this device and connected drives to find tracks that aren't stored in a Rekordbox or Serato library format.");
-    const QString detail = tr(
-            "Local files, downloads, and drives that weren't exported from DJ software can be found here. Track loaded"
-            "from here are saved to your device's library.");
+    // The kiosk lists only the plugged-in drives (see the constructor).
+    const bool kiosk = DlgPreferences::kioskMode();
+    const QString summary = kiosk
+            ? tr("Browse a USB drive or SD card by folder to find tracks that weren't exported "
+                 "from Rekordbox or Serato.")
+            : tr("Browse items on this device and connected drives to find tracks that aren't stored in a Rekordbox or Serato library format.");
+    const QString detail = kiosk
+            ? tr("Plug in a drive, open \"Removable Devices\" on the left and pick a folder. "
+                 "If a drive doesn't show up, tap REFRESH DRIVES. Tracks you load from here are "
+                 "saved to your library.")
+            : tr("Local files, downloads, and drives that weren't exported from DJ software can be found here. Track loaded"
+                 "from here are saved to your device's library.");
 
     QString html;
     html.append(QString("<h1>%1</h1>").arg(title));

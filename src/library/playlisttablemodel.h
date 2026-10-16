@@ -25,6 +25,11 @@ class PlaylistTableModel final : public TrackSetTableModel {
             const QModelIndex& exclude = QModelIndex());
     void orderTracksByCurrPos();
 
+    // The Auto DJ queue shows only: #, cover, title, artist, BPM, key
+    QList<QPair<int, int>> defaultColumnLayout() const override;
+    int defaultColumnLayoutVersion() const override;
+    int defaultFlexibleColumn() const override;
+
     bool isColumnInternal(int column) final;
     bool isColumnHiddenByDefault(int column) final;
     /// This function should only be used by AUTODJ

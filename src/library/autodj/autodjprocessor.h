@@ -6,6 +6,9 @@
 #include <vector>
 
 #include "audio/frame.h"
+#include <QTimer>
+
+#include "control/controlobject.h"
 #include "control/controlproxy.h"
 #include "control/controlpushbutton.h"
 #include "control/pollingcontrolproxy.h"
@@ -202,6 +205,29 @@ class AutoDJProcessor : public QObject {
 
     void setTransitionMode(TransitionMode newMode);
 
+    // --- Sessions (the kiosk's Auto DJ page) ---
+    // A session is "Auto DJ is the one choosing what plays": it starts empty, the first track that
+    // is added starts it playing (Auto DJ is switched on by itself), and ending it switches Auto DJ
+    // off and empties the queue.
+    bool isSessionActive() const {
+        return m_sessionActive;
+    }
+    void startSession();
+    void endSession();
+
+    // --- Smart mix: tempo-matched, bar-aligned transitions (only inside a session) ---
+    bool smartMixEnabled() const {
+        return m_smartMix;
+    }
+    void setSmartMixEnabled(bool enabled);
+    // Length of a smart transition in beats (8, 16 or 32)
+    int smartBeats() const {
+        return m_smartBeats;
+    }
+    void setSmartBeats(int beats);
+    // Re-orders the queue after the loaded track so BPM and key change little from track to track.
+    void sortQueueSmart();
+
     AutoDJError shufflePlaylist(const QModelIndexList& selectedIndices);
     AutoDJError skipNext();
     void fadeNow();
@@ -220,6 +246,8 @@ class AutoDJProcessor : public QObject {
     void autoDJError(AutoDJProcessor::AutoDJError error);
     void transitionTimeChanged(int time);
     void randomTrackRequested(int tracksToAdd);
+    void sessionActiveChanged(bool active);
+    void smartSettingsChanged();
 
   private slots:
     void crossfaderChanged(double value);
@@ -242,6 +270,8 @@ class AutoDJProcessor : public QObject {
     void controlSkipNext(double value);
     void controlAddRandomTrack(double value);
     void slotNumberOfDecksChanged(int decks);
+    void slotQueueTracksAdded();
+    void slotTempoEaseStep();
 
   protected:
     // The following virtual signal wrappers are used for testing
@@ -274,6 +304,19 @@ class AutoDJProcessor : public QObject {
     double getLastSoundSecond(DeckAttributes* pDeck);
     double getEndSecond(DeckAttributes* pDeck);
     double framePositionToSeconds(mixxx::audio::FramePos position, DeckAttributes* pDeck);
+
+    // Smart transition: where the fade starts and ends (on bar lines, N beats long) and where the
+    // incoming track starts (its first bar line). Fills the same fields as the stock modes, in
+    // seconds. False when a track has no beat grid: the stock mode is used then.
+    bool calculateSmartTransition(DeckAttributes* pFromDeck,
+            DeckAttributes* pToDeck,
+            double fromDeckPosition,
+            double toDeckStartSeconds,
+            bool startFromMarkers);
+    void smartBegin(DeckAttributes* pFromDeck, DeckAttributes* pToDeck);
+    void smartUpdate(DeckAttributes* pFromDeck, DeckAttributes* pToDeck, double progress);
+    void smartEnd(DeckAttributes* pFromDeck, DeckAttributes* pToDeck);
+    void smartReset();
 
     TrackPointer getNextTrackFromQueue();
     bool loadNextTrackFromQueue(const DeckAttributes& pDeck, bool play = false);
@@ -319,6 +362,22 @@ class AutoDJProcessor : public QObject {
     ControlPushButton m_addRandomTrack;
     ControlPushButton m_fadeNow;
     ControlPushButton m_enabledAutoDJ;
+    // [AutoDJ],session_active: 1 during a session (the track pop-up reads it)
+    ControlObject m_coSessionActive;
+
+    TrackCollectionManager* m_pTrackCollectionManager;
+    int m_iAutoDJPlaylistId;
+    bool m_sessionActive = false;
+    bool m_smartMix = true;
+    int m_smartBeats = 32;
+    // state of the transition that is running
+    bool m_smartSynced = false;
+    bool m_smartBassSwapped = false;
+    bool m_smartTouched = false; // smartBegin() changed controls that smartReset() puts back
+    QTimer m_tempoEaseTimer;
+    QString m_easeGroup;
+    double m_easeFromRatio = 1.0;
+    int m_easeStep = 0;
 
     DISALLOW_COPY_AND_ASSIGN(AutoDJProcessor);
 };

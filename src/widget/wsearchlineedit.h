@@ -46,6 +46,7 @@ class WSearchLineEdit : public QComboBox, public WBaseWidget {
   protected:
     void resizeEvent(QResizeEvent*) override;
     void focusInEvent(QFocusEvent*) override;
+    void changeEvent(QEvent* pEvent) override;
     void focusOutEvent(QFocusEvent*) override;
     bool event(QEvent*) override;
     bool eventFilter(QObject* obj, QEvent* event) override;

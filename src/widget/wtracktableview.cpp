@@ -513,6 +513,12 @@ void WTrackTableView::showLoadPopup() {
         return;
     }
     // Qt::Popup: closes itself when you click anywhere outside it.
+    // During an Auto DJ session the tracks are not loaded by hand: a tap offers to add the track to
+    // the session (or, on the queue itself, to take it out).
+    if (ControlObject::toBool(ConfigKey(QStringLiteral("[AutoDJ]"), QStringLiteral("session_active")))) {
+        showAutoDJSessionPopup();
+        return;
+    }
     auto* pPopup = new QFrame(this, Qt::Popup);
     pPopup->setObjectName(QStringLiteral("LoadPopup"));
     pPopup->setAttribute(Qt::WA_DeleteOnClose);
@@ -572,6 +578,77 @@ void WTrackTableView::showLoadPopup() {
     }
     pPopup->move(pos);
     pPopup->show();
+}
+
+void WTrackTableView::showAutoDJSessionPopup() {
+    auto* pTrackModel = getTrackModel();
+    if (!pTrackModel) {
+        return;
+    }
+    const bool isQueue = pTrackModel->hasCapabilities(TrackModel::Capability::Remove) &&
+            !pTrackModel->hasCapabilities(TrackModel::Capability::AddToAutoDJ);
+    if (!isQueue && !pTrackModel->hasCapabilities(TrackModel::Capability::AddToAutoDJ)) {
+        return; // nothing to do with this list during a session
+    }
+    auto* pPopup = new QFrame(this, Qt::Popup);
+    pPopup->setObjectName(QStringLiteral("LoadPopup"));
+    pPopup->setAttribute(Qt::WA_DeleteOnClose);
+    pPopup->setAttribute(Qt::WA_StyledBackground);
+    auto* pLayout = new QHBoxLayout(pPopup);
+    pLayout->setContentsMargins(0, 0, 0, 0);
+    pLayout->setSpacing(0);
+
+    auto* pButton = new QPushButton(
+            isQueue ? tr("REMOVE FROM SESSION") : tr("ADD TO AUTO DJ"), pPopup);
+    pButton->setObjectName(QStringLiteral("LoadPopupButton"));
+    pButton->setFocusPolicy(Qt::NoFocus);
+    pLayout->addWidget(pButton);
+    connect(pButton, &QPushButton::clicked, this, [this, pPopup, isQueue]() {
+        if (isQueue) {
+            if (auto* pModel = getTrackModel()) {
+                pModel->removeTracks(getSelectedRows());
+            }
+            pPopup->close();
+            return;
+        }
+        addSelectedToAutoDJSession();
+        pPopup->close();
+    });
+
+    pPopup->adjustSize();
+    QPoint pos = QCursor::pos();
+    if (const QScreen* pScreen = screen()) {
+        const QRect avail = pScreen->availableGeometry();
+        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
+    }
+    pPopup->move(pos);
+    pPopup->show();
+}
+
+void WTrackTableView::addSelectedToAutoDJSession() {
+    auto* pTrackModel = getTrackModel();
+    if (!pTrackModel) {
+        return;
+    }
+    // Tracks of Rekordbox / Serato / Browse lists are put into the library when they are asked for,
+    // which is also what gives them the id the queue needs.
+    QList<TrackId> trackIds;
+    const QModelIndexList rows = getSelectedRows();
+    for (const QModelIndex& row : rows) {
+        const TrackPointer pTrack = pTrackModel->getTrack(row);
+        if (pTrack && pTrack->getId().isValid()) {
+            trackIds.append(pTrack->getId());
+        }
+    }
+    if (trackIds.isEmpty()) {
+        return;
+    }
+    m_pLibrary->trackCollectionManager()->unhideTracks(trackIds);
+    m_pLibrary->trackCollectionManager()
+            ->internalCollection()
+            ->getPlaylistDAO()
+            .addTracksToAutoDJQueue(trackIds, PlaylistDAO::AutoDJSendLoc::BOTTOM);
 }
 
 namespace {
@@ -794,6 +871,10 @@ void WTrackTableView::showRecordingPopup() {
 void WTrackTableView::slotMouseDoubleClicked(const QModelIndex& index) {
     // A double-click loads straight to a deck, so no popup for it.
     m_loadPopupTimer.stop();
+    // During an Auto DJ session nothing is loaded by hand.
+    if (ControlObject::toBool(ConfigKey(QStringLiteral("[AutoDJ]"), QStringLiteral("session_active")))) {
+        return;
+    }
 
     // Read the current TrackDoubleClickAction setting
     // TODO simplify this casting madness

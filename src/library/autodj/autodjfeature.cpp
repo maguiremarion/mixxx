@@ -14,6 +14,7 @@
 #include "library/trackset/crate/cratestorage.h"
 #include "library/treeitem.h"
 #include "moc_autodjfeature.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "sources/soundsourceproxy.h"
 #include "track/track.h"
 #include "util/clipboard.h"
@@ -70,11 +71,15 @@ AutoDJFeature::AutoDJFeature(Library* pLibrary,
 
     // Create the "Crates" tree-item under the root item.
     std::unique_ptr<TreeItem> pRootItem = TreeItem::newRoot(this);
-    m_pCratesTreeItem = pRootItem->appendChild(tr("Crates"));
-    m_pCratesTreeItem->setIcon(QIcon(":/images/library/ic_library_crates.svg"));
+    m_pCratesTreeItem = nullptr;
+    if (!DlgPreferences::kioskMode()) {
+        // (The kiosk's Auto DJ is a page of its own, with nothing to open under it.)
+        m_pCratesTreeItem = pRootItem->appendChild(tr("Crates"));
+        m_pCratesTreeItem->setIcon(QIcon(":/images/library/ic_library_crates.svg"));
 
-    // Create tree-items under "Crates".
-    constructCrateChildModel();
+        // Create tree-items under "Crates".
+        constructCrateChildModel();
+    }
 
     m_pSidebarModel->setRootItem(std::move(pRootItem));
 
@@ -275,6 +280,9 @@ void AutoDJFeature::slotRemoveCrateFromAutoDj() {
 }
 
 void AutoDJFeature::slotCrateChanged(CrateId crateId) {
+    if (!m_pCratesTreeItem) {
+        return;
+    }
     Crate crate;
     if (m_pTrackCollection->crates().readCrateById(crateId, &crate) && crate.isAutoDjSource()) {
         // Crate exists and is already a source for AutoDJ

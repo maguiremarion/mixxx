@@ -1,18 +1,28 @@
 #include "library/autodj/dlgautodj.h"
 
+#include <QFrame>
+#include <QGridLayout>
+#include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPushButton>
+#include <QStyle>
+#include <QTimer>
+#include <QVBoxLayout>
 
 #include "controllers/keyboard/keyboardeventfilter.h"
 #include "library/library.h"
 #include "library/playlisttablemodel.h"
 #include "moc_dlgautodj.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "track/track.h"
 #include "util/assert.h"
 #include "util/duration.h"
 #include "widget/wlibrary.h"
 #include "widget/wtracktableview.h"
+#include "widget/wtracktableviewheader.h"
 
 namespace {
 const char* kPreferenceGroupName = "[Auto DJ]";
@@ -224,6 +234,10 @@ DlgAutoDJ::DlgAutoDJ(WLibrary* parent,
     autoDJStateChanged(m_pAutoDJProcessor->getState());
 
     updateSelectionInfo();
+
+    if (DlgPreferences::kioskMode()) {
+        applyKioskLayout();
+    }
 }
 
 DlgAutoDJ::~DlgAutoDJ() {
@@ -232,6 +246,197 @@ DlgAutoDJ::~DlgAutoDJ() {
     // Delete m_pTrackTableView before the table model. This is because the
     // table view saves the header state using the model.
     delete m_pTrackTableView;
+}
+
+void DlgAutoDJ::applyKioskLayout() {
+    m_kiosk = true;
+    setAttribute(Qt::WA_StyledBackground, true); // the skin gives the page its grey
+    LibraryFeatureControls->hide();
+    labelSelectionInfo->hide();
+    m_pTrackTableView->setObjectName(QStringLiteral("AutoDjQueue"));
+
+    const auto makeLabel = [this](const QString& text, const char* objectName) {
+        auto* pLabel = new QLabel(text, this);
+        pLabel->setObjectName(QLatin1String(objectName));
+        pLabel->setWordWrap(true);
+        return pLabel;
+    };
+    const auto makeButton = [this](const QString& text, const char* objectName) {
+        auto* pButton = new QPushButton(text, this);
+        pButton->setObjectName(QLatin1String(objectName));
+        pButton->setFocusPolicy(Qt::NoFocus);
+        return pButton;
+    };
+
+    // --- the introduction, shown while there is no session
+    m_pIntroPage = new QWidget(this);
+    auto* pIntro = new QVBoxLayout(m_pIntroPage);
+    pIntro->setContentsMargins(10, 4, 12, 12);
+    pIntro->setSpacing(10);
+    pIntro->addWidget(makeLabel(tr("Auto DJ"), "AutoDjTitle"));
+    pIntro->addWidget(makeLabel(tr("Auto DJ plays a list of tracks one after another and mixes "
+                                   "each into the next for you. It matches the tempo, lines up "
+                                   "the beats and blends the bass, so the music keeps flowing "
+                                   "while you do something else."),
+            "AutoDjText"));
+    // The three steps: the number sits in a column of its own, so a step that wraps lines up under
+    // its own words and not under the number.
+    auto* pSteps = new QGridLayout();
+    pSteps->setContentsMargins(0, 0, 0, 0);
+    pSteps->setHorizontalSpacing(10);
+    pSteps->setVerticalSpacing(6);
+    pSteps->setColumnStretch(1, 1);
+    const QStringList steps = {
+            tr("Start a session."),
+            tr("Browse your music, tap a track and choose ADD TO AUTO DJ."),
+            tr("Sit back. The first track starts playing and the rest follow. Keep adding tracks, "
+               "or tap one in the queue to take it out. End the session whenever you like."),
+    };
+    for (int i = 0; i < steps.size(); ++i) {
+        QLabel* pNumber = makeLabel(QStringLiteral("%1.").arg(i + 1), "AutoDjSteps");
+        pNumber->setWordWrap(false);
+        pNumber->setAlignment(Qt::AlignTop | Qt::AlignRight);
+        pNumber->setMinimumWidth(22);
+        pSteps->addWidget(pNumber, i, 0, Qt::AlignTop);
+        pSteps->addWidget(makeLabel(steps.at(i), "AutoDjSteps"), i, 1);
+    }
+    pIntro->addLayout(pSteps);
+    pIntro->addSpacing(8);
+    QPushButton* pStart = makeButton(tr("START AUTO DJ SESSION"), "AutoDjStartBtn");
+    pStart->setFixedHeight(48);
+    pStart->setMinimumWidth(280);
+    connect(pStart, &QPushButton::clicked, this, [this]() {
+        m_pAutoDJProcessor->startSession();
+    });
+    pIntro->addWidget(pStart, 0, Qt::AlignLeft);
+    pIntro->addStretch(1);
+
+    // --- a session: one bar (title, the two settings, end), a line saying what they do, the queue
+    m_pSessionBar = new QWidget(this);
+    auto* pSession = new QVBoxLayout(m_pSessionBar);
+    pSession->setContentsMargins(12, 0, 12, 4);
+    pSession->setSpacing(6);
+
+    auto* pBarRow = new QHBoxLayout();
+    pBarRow->setSpacing(8);
+    pBarRow->addWidget(makeLabel(tr("AUTO DJ"), "AutoDjBarTitle"));
+    auto* pLive = makeLabel(tr("ACTIVE"), "AutoDjLive");
+    pLive->setWordWrap(false);
+    pBarRow->addWidget(pLive);
+    pBarRow->addStretch(1);
+    for (int beats : {8, 16, 32}) {
+        QPushButton* pLength = makeButton(tr("%1").arg(beats), "AutoDjSegBtn");
+        pLength->setCheckable(true);
+        pLength->setFixedSize(46, 40);
+        pLength->setProperty("beats", beats);
+        connect(pLength, &QPushButton::clicked, this, [this, beats]() {
+            m_pAutoDJProcessor->setSmartBeats(beats);
+            updateSmartButtons();
+        });
+        m_lengthBtns.append(pLength);
+        pBarRow->addWidget(pLength);
+    }
+    pBarRow->addWidget(makeLabel(tr("BEATS"), "AutoDjCaption"), 0, Qt::AlignVCenter);
+    pBarRow->addSpacing(36);
+    m_pOrderBtn = makeButton(tr("SMART ORDER"), "AutoDjBarBtn");
+    m_pOrderBtn->setFixedSize(150, 40);
+    pBarRow->addWidget(m_pOrderBtn);
+    pBarRow->addStretch(1);
+    m_pEndBtn = makeButton(tr("END SESSION"), "AutoDjEndBtn");
+    m_pEndBtn->setFixedHeight(40);
+    pBarRow->addWidget(m_pEndBtn);
+    pSession->addLayout(pBarRow);
+
+    // What the two settings do, one line each
+    auto* pBeatsHelp = makeLabel(
+            tr("BEATS: how long each blend lasts. 32 is about 15 seconds at 128 BPM."),
+            "AutoDjHelp");
+    auto* pOrderHelp = makeLabel(
+            tr("SMART ORDER: puts the queue in an order where tempo and key change the least."),
+            "AutoDjHelp");
+    pBeatsHelp->setWordWrap(false);
+    pOrderHelp->setWordWrap(false);
+    pSession->addWidget(pBeatsHelp);
+    pSession->addWidget(pOrderHelp);
+
+    // --- shown instead of the (empty) queue
+    // Three short lines, centred, instead of one paragraph that wraps with a lone word on its
+    // last line
+    m_pEmptyHint = makeLabel(tr("Your queue is empty.\n\n"
+                                "Browse to a track, tap it and choose ADD TO AUTO DJ.\n"
+                                "The first track you add starts playing."),
+            "AutoDjText");
+    m_pEmptyHint->setWordWrap(false);
+    m_pEmptyHint->setAlignment(Qt::AlignCenter);
+    m_pEmptyHint->setContentsMargins(20, 20, 20, 20);
+
+    QBoxLayout* pBox = qobject_cast<QBoxLayout*>(layout());
+    pBox->insertWidget(0, m_pIntroPage, 1);
+    pBox->insertWidget(1, m_pSessionBar);
+    pBox->insertWidget(2, m_pEmptyHint, 1);
+
+    connect(m_pOrderBtn, &QPushButton::clicked, this, [this]() {
+        m_pAutoDJProcessor->sortQueueSmart();
+    });
+    // Ending a session takes two taps, like SHUT DOWN: a stray touch must not stop the music.
+    connect(m_pEndBtn, &QPushButton::clicked, this, [this]() {
+        if (!m_endArmed) {
+            m_endArmed = true;
+            m_pEndBtn->setText(tr("TAP AGAIN TO END"));
+            m_pEndBtn->setProperty("armed", true);
+            m_pEndBtn->style()->unpolish(m_pEndBtn);
+            m_pEndBtn->style()->polish(m_pEndBtn);
+            QPointer<QPushButton> pGuard(m_pEndBtn);
+            QTimer::singleShot(4000, this, [this, pGuard]() {
+                if (pGuard && m_endArmed) {
+                    m_endArmed = false;
+                    pGuard->setText(tr("END SESSION"));
+                    pGuard->setProperty("armed", false);
+                    pGuard->style()->unpolish(pGuard);
+                    pGuard->style()->polish(pGuard);
+                }
+            });
+            return;
+        }
+        m_endArmed = false;
+        m_pAutoDJProcessor->endSession();
+    });
+
+    connect(m_pAutoDJProcessor, &AutoDJProcessor::sessionActiveChanged, this, &DlgAutoDJ::updateSessionView);
+    connect(m_pAutoDJProcessor, &AutoDJProcessor::smartSettingsChanged, this, &DlgAutoDJ::updateSmartButtons);
+    connect(m_pAutoDJTableModel, &QAbstractItemModel::rowsInserted, this, &DlgAutoDJ::updateSessionView);
+    connect(m_pAutoDJTableModel, &QAbstractItemModel::rowsRemoved, this, &DlgAutoDJ::updateSessionView);
+    connect(m_pAutoDJTableModel, &QAbstractItemModel::modelReset, this, &DlgAutoDJ::updateSessionView);
+    // The session is always a smart mix
+    m_pAutoDJProcessor->setSmartMixEnabled(true);
+    updateSmartButtons();
+    updateSessionView();
+}
+
+void DlgAutoDJ::updateSmartButtons() {
+    if (!m_kiosk) {
+        return;
+    }
+    for (const QPointer<QPushButton>& pButton : std::as_const(m_lengthBtns)) {
+        pButton->setChecked(pButton->property("beats").toInt() == m_pAutoDJProcessor->smartBeats());
+    }
+}
+
+void DlgAutoDJ::updateSessionView() {
+    if (!m_kiosk) {
+        return;
+    }
+    const bool active = m_pAutoDJProcessor->isSessionActive();
+    const int rows = m_pAutoDJTableModel->rowCount();
+    m_pIntroPage->setVisible(!active);
+    m_pSessionBar->setVisible(active);
+    m_pEmptyHint->setVisible(active && rows == 0);
+    m_pTrackTableView->setVisible(active && rows > 0);
+    m_pOrderBtn->setEnabled(rows > 2);
+    if (!active) {
+        m_endArmed = false;
+        m_pEndBtn->setText(tr("END SESSION"));
+    }
 }
 
 void DlgAutoDJ::setupActionButton(QPushButton* pButton,
@@ -245,6 +450,18 @@ void DlgAutoDJ::setupActionButton(QPushButton* pButton,
 
 void DlgAutoDJ::onShow() {
     m_pAutoDJTableModel->select();
+    if (m_kiosk) {
+        // The header's text is drawn in the header's own font, which a table gets when its model
+        // is loaded. This table loads its model before the skin has styled it, so its header kept
+        // the plain application font while the other tables' headers got the styled one. Now that
+        // the page is on screen, give it the table's styled font.
+        if (auto* pHeader = qobject_cast<WTrackTableViewHeader*>(
+                    m_pTrackTableView->horizontalHeader())) {
+            qInfo() << "Auto DJ header font" << pHeader->font() << "table font"
+                    << m_pTrackTableView->font();
+            pHeader->setFont(m_pTrackTableView->font());
+        }
+    }
 }
 
 void DlgAutoDJ::onSearch(const QString& text) {
@@ -287,7 +504,8 @@ void DlgAutoDJ::autoDJError(AutoDJProcessor::AutoDJError error) {
     case AutoDJProcessor::ADJ_BOTH_DECKS_PLAYING:
         QMessageBox::warning(nullptr,
                 tr("Auto DJ"),
-                tr("One deck must be stopped to enable Auto DJ mode."),
+                m_kiosk ? tr("Both decks are playing. Pause one of them, then add another track.")
+                        : tr("One deck must be stopped to enable Auto DJ mode."),
                 QMessageBox::Ok);
         break;
     case AutoDJProcessor::ADJ_UNUSED_DECK_PLAYING:

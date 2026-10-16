@@ -967,15 +967,20 @@ QVariant BaseTrackTableModel::roleValue(
             const QVariant keyCodeValue = rawSiblingValue(
                     index,
                     ColumnCache::COLUMN_LIBRARYTABLE_KEY_ID);
-            if (keyCodeValue.isNull()) {
-                return QVariant();
+            auto key = mixxx::track::io::key::INVALID;
+            if (!keyCodeValue.isNull()) {
+                bool ok;
+                const auto keyCode = keyCodeValue.toInt(&ok);
+                VERIFY_OR_DEBUG_ASSERT(ok) {
+                    return QVariant();
+                }
+                key = KeyUtils::keyFromNumericValue(keyCode);
+            } else {
+                // Lists of an external library (Rekordbox, Serato) only have the key as text
+                // ("Am", "8A"...): read the colour from that.
+                key = KeyUtils::guessKeyFromText(
+                        rawSiblingValue(index, ColumnCache::COLUMN_LIBRARYTABLE_KEY).toString());
             }
-            bool ok;
-            const auto keyCode = keyCodeValue.toInt(&ok);
-            VERIFY_OR_DEBUG_ASSERT(ok) {
-                return QVariant();
-            }
-            const auto key = KeyUtils::keyFromNumericValue(keyCode);
             if (key == mixxx::track::io::key::INVALID || !s_keyColorPalette.has_value()) {
                 return QVariant();
             }

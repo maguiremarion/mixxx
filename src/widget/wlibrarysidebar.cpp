@@ -11,6 +11,7 @@
 #include <QMouseEvent>
 #include <QPen>
 #include <QPainter>
+#include <QScrollBar>
 #include <QScroller>
 #include <QScrollerProperties>
 #include <QUrl>
@@ -48,6 +49,16 @@ WLibrarySidebar::WLibrarySidebar(QWidget* parent)
     header()->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setTextElideMode(Qt::ElideRight);
+    // The sidebar never moves sideways. When a long list brings in the vertical scroll bar the
+    // column can briefly be a scroll bar's width wider than the room left (the width is worked out
+    // before the bar appears), which gave the finger scrolling a little sideways range to drag
+    // into. Keep that range at zero.
+    connect(horizontalScrollBar(), &QScrollBar::rangeChanged, this, [this](int, int max) {
+        if (max > 0) {
+            horizontalScrollBar()->setRange(0, 0);
+            horizontalScrollBar()->setValue(0);
+        }
+    });
 
     // Finger scrolling, like the track table.
     setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);

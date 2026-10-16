@@ -27,7 +27,8 @@ ConfigKey ensureShowCamelotControl() {
     // quit). The OS reclaims the memory when the process ends.
     static ControlPushButton* s_pShowCamelot = nullptr;
     if (!s_pShowCamelot) {
-        s_pShowCamelot = new ControlPushButton(kShowCamelotKey, /*persist*/ true);
+        // On unless somebody chose otherwise: keys read "8A", not "Am"
+        s_pShowCamelot = new ControlPushButton(kShowCamelotKey, /*persist*/ true, /*default*/ 1.0);
         s_pShowCamelot->setButtonMode(mixxx::control::ButtonMode::Toggle);
     }
     return kShowCamelotKey;

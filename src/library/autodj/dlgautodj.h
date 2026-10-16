@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QList>
+#include <QPointer>
 #include <QString>
 #include <QWidget>
 
@@ -14,6 +16,8 @@ class WLibrary;
 class WTrackTableView;
 class Library;
 class KeyboardEventFilter;
+class QLabel;
+class QPushButton;
 
 class DlgAutoDJ : public QWidget, public Ui::DlgAutoDJ, public LibraryView {
     Q_OBJECT
@@ -59,7 +63,14 @@ class DlgAutoDJ : public QWidget, public Ui::DlgAutoDJ, public LibraryView {
 #endif
     void trackSelected(TrackPointer pTrack);
 
+  private slots:
+    void updateSessionView();
+    void updateSmartButtons();
+
   private:
+    // The kiosk's page: an introduction with a start button, then (during a session) the queue and
+    // its controls. The stock buttons above the queue are not shown.
+    void applyKioskLayout();
     void setupActionButton(QPushButton* pButton,
             void (DlgAutoDJ::*pSlot)(bool),
             const QString& fallbackText);
@@ -75,4 +86,15 @@ class DlgAutoDJ : public QWidget, public Ui::DlgAutoDJ, public LibraryView {
 
     QString m_enableBtnTooltip;
     QString m_disableBtnTooltip;
+
+    // kiosk page
+    bool m_kiosk = false;
+    QPointer<QWidget> m_pIntroPage;
+    QPointer<QWidget> m_pSessionBar;
+    QPointer<QLabel> m_pEmptyHint;
+    QPointer<QLabel> m_pQueueCaption;
+    QPointer<QPushButton> m_pOrderBtn;
+    QPointer<QPushButton> m_pEndBtn;
+    QList<QPointer<QPushButton>> m_lengthBtns;
+    bool m_endArmed = false;
 };

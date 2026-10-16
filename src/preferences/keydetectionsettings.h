@@ -48,7 +48,7 @@ class KeyDetectionSettings {
 
     // TODO(rryan): Enum
     DEFINE_PREFERENCE_HELPERS(KeyNotation, QString,
-                              KEY_CONFIG_KEY, KEY_NOTATION, KEY_NOTATION_TRADITIONAL);
+                              KEY_CONFIG_KEY, KEY_NOTATION, KEY_NOTATION_LANCELOT);
 
     DEFINE_PREFERENCE_HELPERS(StemStrategy,
             StemStrategy,

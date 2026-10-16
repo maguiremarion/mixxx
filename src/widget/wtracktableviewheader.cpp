@@ -332,8 +332,16 @@ void WTrackTableViewHeader::restoreHeaderState() {
     }
     // A model with its own layout (Rekordbox) fills the table: the last column (the overview
     // waveform) takes whatever width the others leave over, instead of an empty strip.
-    if (!pTrackModel->defaultColumnLayout().isEmpty()) {
+    const QList<QPair<int, int>> layout = pTrackModel->defaultColumnLayout();
+    if (!layout.isEmpty()) {
         setStretchLastSection(true);
+        // That last column takes what the others leave, so a width that was saved with it must
+        // not be restored: it was only as wide as the window was then (a window that was briefly
+        // too big once left the overview column 1054 px wide for good).
+        const int lastColumn = layout.last().first;
+        if (lastColumn >= 0 && lastColumn < count() && !isSectionHidden(lastColumn)) {
+            resizeSection(lastColumn, layout.last().second);
+        }
     }
 }
 

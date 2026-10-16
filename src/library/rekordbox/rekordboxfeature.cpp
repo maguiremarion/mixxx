@@ -1681,10 +1681,10 @@ QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
     return {
             {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 200},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 192},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 141},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 51},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 156},
     };
@@ -1701,7 +1701,9 @@ int RekordboxPlaylistModel::defaultColumnLayoutVersion() const {
     // 4: Duration trimmed back a little (86 -> 80)
     // 5: widths fill the table (764 of 766 px), Duration sized to its title
     // 6: only Duration is measured against its title; all other widths are fixed
-    return 6;
+    // 7: Key 8 px wider (three-character keys like 10A), Title 8 px narrower; also clears an
+    //    Overview width of 1054 px that was saved while the window was briefly oversized
+    return 7;
 }
 
 bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {

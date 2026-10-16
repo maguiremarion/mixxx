@@ -1,9 +1,18 @@
 #include "library/autodj/autodjprocessor.h"
 
+#include <QRandomGenerator>
+#include <cmath>
+#include <optional>
+
 #include "engine/channels/enginedeck.h"
+#include "library/dao/playlistdao.h"
+#include "library/trackcollection.h"
+#include "library/trackcollectionmanager.h"
 #include "mixer/basetrackplayer.h"
 #include "mixer/playermanager.h"
 #include "moc_autodjprocessor.cpp"
+#include "track/beats.h"
+#include "track/keyutils.h"
 #include "track/track.h"
 #include "util/logger.h"
 #include "util/math.h"
@@ -163,7 +172,23 @@ AutoDJProcessor::AutoDJProcessor(
           m_skipNext(ConfigKey(kControlGroup, QStringLiteral("skip_next"))),
           m_addRandomTrack(ConfigKey(kControlGroup, QStringLiteral("add_random_track"))),
           m_fadeNow(ConfigKey(kControlGroup, QStringLiteral("fade_now"))),
-          m_enabledAutoDJ(ConfigKey(kControlGroup, QStringLiteral("enabled"))) {
+          m_enabledAutoDJ(ConfigKey(kControlGroup, QStringLiteral("enabled"))),
+          m_coSessionActive(ConfigKey(kControlGroup, QStringLiteral("session_active"))),
+          m_pTrackCollectionManager(pTrackCollectionManager),
+          m_iAutoDJPlaylistId(iAutoDJPlaylistId) {
+    m_coSessionActive.set(0.0);
+    m_smartMix = m_pConfig->getValue<bool>(ConfigKey(kPreferenceGroup, QStringLiteral("SmartMix")), true);
+    m_smartBeats = m_pConfig->getValue<int>(ConfigKey(kPreferenceGroup, QStringLiteral("SmartBeats")), 32);
+    if (m_smartBeats != 8 && m_smartBeats != 16 && m_smartBeats != 32) {
+        m_smartBeats = 16;
+    }
+    m_tempoEaseTimer.setInterval(250);
+    connect(&m_tempoEaseTimer, &QTimer::timeout, this, &AutoDJProcessor::slotTempoEaseStep);
+    // A track added to the queue while a session is waiting for its first one starts it.
+    connect(&pTrackCollectionManager->internalCollection()->getPlaylistDAO(),
+            &PlaylistDAO::tracksAdded,
+            this,
+            &AutoDJProcessor::slotQueueTracksAdded);
     m_pAutoDJTableModel = make_parented<PlaylistTableModel>(
             this, pTrackCollectionManager, "mixxx.db.model.autodj");
     m_pAutoDJTableModel->selectPlaylist(iAutoDJPlaylistId);
@@ -622,6 +647,7 @@ AutoDJProcessor::AutoDJError AutoDJProcessor::toggleAutoDJ(bool enable) {
         m_enabledAutoDJ.setAndConfirm(0.0);
         qDebug() << "Auto DJ disabled";
         m_eState = ADJ_DISABLED;
+        smartReset();
         disconnect(&m_coCrossfader,
                 &ControlProxy::valueChanged,
                 this,
@@ -905,6 +931,9 @@ void AutoDJProcessor::playerPositionChanged(DeckAttributes* pAttributes,
                 }
 
                 if (!otherDeckPlaying) {
+                    if (m_sessionActive && m_smartMix) {
+                        smartBegin(thisDeck, otherDeck);
+                    }
                     otherDeck->play();
                 }
 
@@ -940,6 +969,9 @@ void AutoDJProcessor::playerPositionChanged(DeckAttributes* pAttributes,
             // We don't handle mode switches here since that's handled by
             // the next playerPositionChanged call otherDeck (see the
             // P1/P2FADING case above).
+            if (m_sessionActive && m_smartMix) {
+                smartEnd(thisDeck, otherDeck);
+            }
             thisDeck->stop();
             m_transitionProgress = 1.0;
             // Note: If the user has stopped the toDeck during the transition.
@@ -965,6 +997,9 @@ void AutoDJProcessor::playerPositionChanged(DeckAttributes* pAttributes,
                 setCrossfader(currentCrossfader + adjustment);
             }
             m_transitionProgress = transitionProgress;
+            if (m_sessionActive && m_smartMix) {
+                smartUpdate(thisDeck, otherDeck, transitionProgress);
+            }
             // if we are at 1.0 here, we need an additional callback until the last
             // step is processed and we can stop the deck.
         }
@@ -1470,7 +1505,15 @@ void AutoDJProcessor::calculateTransition(DeckAttributes* pFromDeck,
     }
 
     m_crossfaderStartCenter = false;
-    switch (m_transitionMode) {
+    // In a session the mix is smart: bar-aligned and tempo matched. Tracks without a beat grid
+    // (or a failed calculation) fall back to the mode chosen below.
+    const bool smartDone = m_sessionActive && m_smartMix &&
+            calculateSmartTransition(pFromDeck,
+                    pToDeck,
+                    fromDeckPosition,
+                    toDeckStartSeconds,
+                    seekToStartPoint || toDeckPositionSeconds >= pToDeck->fadeBeginPos);
+    if (!smartDone) switch (m_transitionMode) {
     case TransitionMode::FullIntroOutro: {
         // Use the outro or intro length for the transition time, whichever is
         // shorter. Let the full outro and intro play; do not cut off any part
@@ -1966,4 +2009,427 @@ bool AutoDJProcessor::nextTrackLoaded() {
     }
 
     return loadedTrack == getNextTrackFromQueue();
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Sessions and smart mixing
+// ---------------------------------------------------------------------------------------------
+
+namespace {
+
+QString eqGroupOf(const QString& deckGroup) {
+    return QStringLiteral("[EqualizerRack1_%1_Effect1]").arg(deckGroup);
+}
+
+QString quickEffectGroupOf(const QString& deckGroup) {
+    return QStringLiteral("[QuickEffectRack1_%1]").arg(deckGroup);
+}
+
+// Is the beat at `beat` the first beat of a bar? Tracks from Rekordbox know which beat that is
+// (Track::downbeatPhase()); for the others the first beat of the grid is taken to start a bar.
+bool isBarStart(const mixxx::BeatsPointer& pBeats, mixxx::audio::FramePos beat, int downbeatPhase) {
+    if (!beat.isValid()) {
+        return false;
+    }
+    const int beatIndex = static_cast<int>(pBeats->iteratorFrom(beat) - pBeats->cbegin());
+    return (((beatIndex - downbeatPhase) % 4) + 4) % 4 == 0;
+}
+
+// The first bar line at or after / at or before `frame`; negative when there is none.
+double barLineAtOrAfter(const mixxx::BeatsPointer& pBeats, int downbeatPhase, double frame) {
+    mixxx::audio::FramePos beat = pBeats->findNextBeat(mixxx::audio::FramePos(frame));
+    for (int i = 0; i < 8 && beat.isValid(); ++i) {
+        if (isBarStart(pBeats, beat, downbeatPhase)) {
+            return beat.value();
+        }
+        beat = pBeats->findNthBeat(beat, 2); // the beat after this one
+    }
+    return -1.0;
+}
+
+double barLineAtOrBefore(const mixxx::BeatsPointer& pBeats, int downbeatPhase, double frame) {
+    mixxx::audio::FramePos beat = pBeats->findPrevBeat(mixxx::audio::FramePos(frame));
+    for (int i = 0; i < 8 && beat.isValid(); ++i) {
+        if (isBarStart(pBeats, beat, downbeatPhase)) {
+            return beat.value();
+        }
+        beat = pBeats->findNthBeat(beat, -2); // the beat before this one
+    }
+    return -1.0;
+}
+
+// How far two tempos are from each other as a ratio, allowing for double / half time.
+double foldedTempoRatio(double toBpm, double fromBpm) {
+    double ratio = toBpm / fromBpm;
+    while (ratio > 1.41) {
+        ratio /= 2.0;
+    }
+    while (ratio < 0.70) {
+        ratio *= 2.0;
+    }
+    return ratio;
+}
+
+} // anonymous namespace
+
+void AutoDJProcessor::startSession() {
+    if (m_sessionActive) {
+        return;
+    }
+    if (m_eState != ADJ_DISABLED) {
+        toggleAutoDJ(false);
+    }
+    // A session starts with an empty queue
+    m_pTrackCollectionManager->internalCollection()->getPlaylistDAO().clearAutoDJQueue();
+    m_pAutoDJTableModel->select();
+    m_sessionActive = true;
+    m_coSessionActive.set(1.0);
+    emit sessionActiveChanged(true);
+}
+
+void AutoDJProcessor::endSession() {
+    if (!m_sessionActive) {
+        return;
+    }
+    if (m_eState != ADJ_DISABLED) {
+        toggleAutoDJ(false); // the track that is playing plays on, nothing follows it
+    }
+    smartReset();
+    m_pTrackCollectionManager->internalCollection()->getPlaylistDAO().clearAutoDJQueue();
+    m_pAutoDJTableModel->select();
+    m_sessionActive = false;
+    m_coSessionActive.set(0.0);
+    emit sessionActiveChanged(false);
+}
+
+void AutoDJProcessor::slotQueueTracksAdded() {
+    if (!m_sessionActive || m_eState != ADJ_DISABLED) {
+        return;
+    }
+    // After the other listeners of the playlist have looked at it
+    QMetaObject::invokeMethod(
+            this,
+            [this]() {
+                if (m_sessionActive && m_eState == ADJ_DISABLED &&
+                        m_pAutoDJTableModel->rowCount() > 0) {
+                    toggleAutoDJ(true);
+                }
+            },
+            Qt::QueuedConnection);
+}
+
+void AutoDJProcessor::setSmartMixEnabled(bool enabled) {
+    if (m_smartMix == enabled) {
+        return;
+    }
+    m_smartMix = enabled;
+    m_pConfig->setValue(ConfigKey(kPreferenceGroup, QStringLiteral("SmartMix")), enabled);
+    emit smartSettingsChanged();
+}
+
+void AutoDJProcessor::setSmartBeats(int beats) {
+    if (beats != 8 && beats != 16 && beats != 32) {
+        return;
+    }
+    if (m_smartBeats == beats) {
+        return;
+    }
+    m_smartBeats = beats;
+    m_pConfig->setValue(ConfigKey(kPreferenceGroup, QStringLiteral("SmartBeats")), beats);
+    emit smartSettingsChanged();
+    // The deck that is playing gets its fade points again
+    if (m_eState == ADJ_IDLE) {
+        DeckAttributes* pFromDeck = getFromDeck();
+        DeckAttributes* pToDeck = pFromDeck ? getOtherDeck(pFromDeck) : nullptr;
+        if (pFromDeck && pToDeck) {
+            calculateTransition(pFromDeck, pToDeck, false);
+        }
+    }
+}
+
+bool AutoDJProcessor::calculateSmartTransition(DeckAttributes* pFromDeck,
+        DeckAttributes* pToDeck,
+        double fromDeckPosition,
+        double toDeckStartSeconds,
+        bool startFromMarkers) {
+    const TrackPointer pFromTrack = pFromDeck->getLoadedTrack();
+    const TrackPointer pToTrack = pToDeck->getLoadedTrack();
+    if (!pFromTrack || !pToTrack) {
+        return false;
+    }
+    const mixxx::BeatsPointer pFromBeats = pFromTrack->getBeats();
+    const mixxx::BeatsPointer pToBeats = pToTrack->getBeats();
+    if (!pFromBeats || !pToBeats || !pFromBeats->firstBeat().isValid() ||
+            !pToBeats->firstBeat().isValid()) {
+        return false; // no beat grid: the plain mode is used
+    }
+    // frames of the track per second of real time (the seconds used here follow the deck's speed)
+    const double fromFps = static_cast<double>(pFromDeck->sampleRate().value()) *
+            pFromDeck->rateRatio();
+    const double toFps = static_cast<double>(pToDeck->sampleRate().value()) *
+            pToDeck->rateRatio();
+    if (!(fromFps > 0.0) || !(toFps > 0.0)) {
+        return false;
+    }
+    const int fromPhase = pFromTrack->downbeatPhase();
+    const int toPhase = pToTrack->downbeatPhase();
+    const int beats = m_smartBeats;
+
+    const double fromEndFrame = getEndSecond(pFromDeck) * fromFps;
+    const double lastSoundFrame = getLastSoundSecond(pFromDeck) * fromFps;
+    const double positionFrame = fromDeckPosition * fromFps;
+    const double outroStartSecond = getOutroStartSecond(pFromDeck);
+    const double outroEndSecond = getOutroEndSecond(pFromDeck);
+
+    const auto beatsFrom = [&pFromBeats](double frame, int n) {
+        const mixxx::audio::FramePos beat =
+                pFromBeats->findNthBeat(mixxx::audio::FramePos(frame), n);
+        return beat.isValid() ? beat.value() : -1.0;
+    };
+
+    // Where the outgoing track is mixed out: at its marked outro when it has one, else so that the
+    // mix ends at its last bar line before the music stops.
+    double beginFrame = -1.0;
+    double endFrame = -1.0;
+    if (outroEndSecond - outroStartSecond > 4.0) {
+        beginFrame = barLineAtOrAfter(pFromBeats, fromPhase, outroStartSecond * fromFps);
+        if (beginFrame >= 0.0) {
+            endFrame = beatsFrom(beginFrame, beats + 1);
+        }
+        if (endFrame < 0.0 || endFrame > lastSoundFrame + fromFps) {
+            beginFrame = -1.0;
+            endFrame = -1.0;
+        }
+    }
+    if (beginFrame < 0.0) {
+        endFrame = barLineAtOrBefore(pFromBeats, fromPhase, lastSoundFrame);
+        if (endFrame >= 0.0) {
+            beginFrame = beatsFrom(endFrame, -(beats + 1));
+        }
+    }
+    if (beginFrame < 0.0 || endFrame <= beginFrame) {
+        return false;
+    }
+    // Enabled late in the track (or it was seeked past the point): mix at the next bar line.
+    if (beginFrame < positionFrame) {
+        beginFrame = barLineAtOrAfter(pFromBeats, fromPhase, positionFrame + 0.25 * fromFps);
+        if (beginFrame < 0.0) {
+            return false;
+        }
+        endFrame = beatsFrom(beginFrame, beats + 1);
+        if (endFrame < 0.0 || endFrame > fromEndFrame) {
+            return false; // not enough track left for a smart mix
+        }
+    }
+
+    // Where the incoming track starts: its first bar line after the intro (or the first sound).
+    double toStartSecond = toDeckStartSeconds;
+    if (startFromMarkers) {
+        toStartSecond = math_max(toStartSecond, getFirstSoundSecond(pToDeck));
+        const double bar = barLineAtOrAfter(pToBeats, toPhase, (toStartSecond - 0.05) * toFps);
+        if (bar >= 0.0) {
+            toStartSecond = bar / toFps;
+        }
+    }
+
+    pFromDeck->fadeBeginPos = beginFrame / fromFps;
+    pFromDeck->fadeEndPos = endFrame / fromFps;
+    pToDeck->startPos = toStartSecond;
+
+    // Only a guard for the fade after the next one: it is calculated again when that track plays.
+    const double toBpm = pToTrack->getBpm();
+    const double toBeatSeconds = toBpm > 1.0 ? 60.0 / (toBpm * pToDeck->rateRatio()) : 0.5;
+    const double toLastSound = getLastSoundSecond(pToDeck);
+    pToDeck->fadeEndPos = toLastSound;
+    pToDeck->fadeBeginPos = math_max(toStartSecond + 1.0, toLastSound - beats * toBeatSeconds - 8.0);
+    return true;
+}
+
+void AutoDJProcessor::smartBegin(DeckAttributes* pFromDeck, DeckAttributes* pToDeck) {
+    m_tempoEaseTimer.stop();
+    m_smartBassSwapped = false;
+    m_smartTouched = true;
+    m_smartSynced = false;
+
+    const TrackPointer pFromTrack = pFromDeck->getLoadedTrack();
+    const TrackPointer pToTrack = pToDeck->getLoadedTrack();
+    if (pFromTrack && pToTrack) {
+        const double fromBpm = pFromTrack->getBpm() * pFromDeck->rateRatio();
+        const double toBpm = pToTrack->getBpm();
+        // Always matched (half / double time counts as the same tempo): two tracks mixed at
+        // their own tempos would drift apart over the whole blend.
+        m_smartSynced = fromBpm > 1.0 && toBpm > 1.0;
+    }
+    // Tempo changes must not change the pitch
+    ControlObject::set(ConfigKey(pFromDeck->group, QStringLiteral("keylock")), 1.0);
+    ControlObject::set(ConfigKey(pToDeck->group, QStringLiteral("keylock")), 1.0);
+    if (m_smartSynced) {
+        // Beats line up when the deck starts (quantize), the outgoing deck leads
+        ControlObject::set(ConfigKey(pToDeck->group, QStringLiteral("quantize")), 1.0);
+        ControlObject::set(ConfigKey(pFromDeck->group, QStringLiteral("sync_enabled")), 1.0);
+        ControlObject::set(ConfigKey(pToDeck->group, QStringLiteral("sync_enabled")), 1.0);
+    }
+    // The incoming track comes in without its bass, which is swapped half-way through.
+    ControlObject::set(ConfigKey(eqGroupOf(pToDeck->group), QStringLiteral("button_parameter1")), 1.0);
+}
+
+void AutoDJProcessor::smartUpdate(
+        DeckAttributes* pFromDeck, DeckAttributes* pToDeck, double progress) {
+    if (!m_smartBassSwapped && progress >= 0.5) {
+        m_smartBassSwapped = true;
+        ControlObject::set(
+                ConfigKey(eqGroupOf(pToDeck->group), QStringLiteral("button_parameter1")), 0.0);
+        ControlObject::set(
+                ConfigKey(eqGroupOf(pFromDeck->group), QStringLiteral("button_parameter1")), 1.0);
+    }
+    if (progress > 0.5) {
+        // The outgoing track gets darker (a low-pass sweep) while it leaves.
+        const double sweep = math_min(1.0, (progress - 0.5) * 2.0);
+        ControlObject::set(
+                ConfigKey(quickEffectGroupOf(pFromDeck->group), QStringLiteral("super1")),
+                0.5 - 0.3 * sweep);
+    }
+}
+
+void AutoDJProcessor::smartEnd(DeckAttributes* pFromDeck, DeckAttributes* pToDeck) {
+    ControlObject::set(
+            ConfigKey(eqGroupOf(pToDeck->group), QStringLiteral("button_parameter1")), 0.0);
+    ControlObject::set(
+            ConfigKey(eqGroupOf(pFromDeck->group), QStringLiteral("button_parameter1")), 0.0);
+    ControlObject::set(
+            ConfigKey(quickEffectGroupOf(pFromDeck->group), QStringLiteral("super1")), 0.5);
+    if (m_smartSynced) {
+        // The incoming track was stretched to the outgoing one's tempo. Free it and let it
+        // find its own tempo again, slowly, so a set does not drift away from the music.
+        ControlObject::set(ConfigKey(pFromDeck->group, QStringLiteral("sync_enabled")), 0.0);
+        ControlObject::set(ConfigKey(pToDeck->group, QStringLiteral("sync_enabled")), 0.0);
+        m_easeGroup = pToDeck->group;
+        m_easeFromRatio = ControlObject::get(ConfigKey(m_easeGroup, QStringLiteral("rate_ratio")));
+        m_easeStep = 0;
+        m_tempoEaseTimer.start();
+    }
+    m_smartSynced = false;
+}
+
+void AutoDJProcessor::slotTempoEaseStep() {
+    constexpr int kSteps = 60; // 15 s
+    if (m_easeGroup.isEmpty() ||
+            ControlObject::get(ConfigKey(m_easeGroup, QStringLiteral("sync_enabled"))) > 0.0) {
+        m_tempoEaseTimer.stop(); // somebody switched sync on again: leave the tempo alone
+        return;
+    }
+    ++m_easeStep;
+    const double t = math_min(1.0, static_cast<double>(m_easeStep) / kSteps);
+    const double s = t * t * (3.0 - 2.0 * t);
+    ControlObject::set(ConfigKey(m_easeGroup, QStringLiteral("rate_ratio")),
+            m_easeFromRatio + (1.0 - m_easeFromRatio) * s);
+    if (m_easeStep >= kSteps) {
+        m_tempoEaseTimer.stop();
+    }
+}
+
+void AutoDJProcessor::smartReset() {
+    m_tempoEaseTimer.stop();
+    if (!m_smartTouched) {
+        return;
+    }
+    m_smartTouched = false;
+    m_smartSynced = false;
+    for (const auto& pDeck : m_decks) {
+        ControlObject::set(
+                ConfigKey(eqGroupOf(pDeck->group), QStringLiteral("button_parameter1")), 0.0);
+        ControlObject::set(
+                ConfigKey(quickEffectGroupOf(pDeck->group), QStringLiteral("super1")), 0.5);
+        ControlObject::set(ConfigKey(pDeck->group, QStringLiteral("sync_enabled")), 0.0);
+    }
+}
+
+void AutoDJProcessor::sortQueueSmart() {
+    struct Entry {
+        TrackId id;
+        int position;
+        double bpm;
+        int keyNumber; // 1-12 on the Camelot / Open Key wheel, 0 when unknown
+        bool major;
+    };
+    const auto describe = [](const TrackPointer& pTrack, TrackId id, int position) {
+        Entry e{id, position, 0.0, 0, false};
+        if (pTrack) {
+            e.bpm = pTrack->getBpm();
+            const auto key = pTrack->getKey();
+            if (key != mixxx::track::io::key::INVALID) {
+                e.keyNumber = KeyUtils::keyToOpenKeyNumber(key);
+                e.major = KeyUtils::keyIsMajor(key);
+            }
+        }
+        return e;
+    };
+    // Cost of playing `b` after `a`: tempo change in percent, plus how far the keys are apart.
+    const auto cost = [](const Entry& a, const Entry& b) {
+        double c = 0.0;
+        if (a.bpm > 1.0 && b.bpm > 1.0) {
+            c += std::fabs(foldedTempoRatio(b.bpm, a.bpm) - 1.0) * 100.0;
+        } else {
+            c += 12.0;
+        }
+        if (a.keyNumber > 0 && b.keyNumber > 0) {
+            int d = std::abs(a.keyNumber - b.keyNumber);
+            d = std::min(d, 12 - d);
+            double k;
+            if (a.major == b.major) {
+                k = d == 0 ? 0.0 : (d == 1 ? 1.0 : 3.0 + d);
+            } else {
+                k = d == 0 ? 1.0 : 4.0 + d; // relative major / minor mix well
+            }
+            c += k * 1.5;
+        } else {
+            c += 6.0;
+        }
+        return c;
+    };
+
+    const int rows = m_pAutoDJTableModel->rowCount();
+    // The track that is already loaded on the idle deck stays where it is.
+    const int pinned = m_eState != ADJ_DISABLED ? 1 : 0;
+    if (rows - pinned < 2) {
+        return;
+    }
+    QList<Entry> pinnedEntries;
+    QList<Entry> rest;
+    for (int row = 0; row < rows; ++row) {
+        const QModelIndex idx = m_pAutoDJTableModel->index(row, 0);
+        const TrackId id = m_pAutoDJTableModel->getTrackId(idx);
+        if (!id.isValid()) {
+            return; // something is not as expected: leave the queue alone
+        }
+        const Entry entry = describe(m_pAutoDJTableModel->getTrack(idx), id, row + 1);
+        (row < pinned ? pinnedEntries : rest).append(entry);
+    }
+    // Where the order starts from: the track that is playing, else the first one in the queue.
+    Entry current = rest.first();
+    if (!pinnedEntries.isEmpty()) {
+        current = pinnedEntries.last();
+    } else if (DeckAttributes* pFrom = getFromDeck()) {
+        current = describe(pFrom->getLoadedTrack(), TrackId(), 0);
+    }
+    QList<std::pair<TrackId, int>> newOrder;
+    for (const Entry& e : std::as_const(pinnedEntries)) {
+        newOrder.append({e.id, e.position});
+    }
+    while (!rest.isEmpty()) {
+        int best = 0;
+        double bestCost = cost(current, rest.first());
+        for (int i = 1; i < rest.size(); ++i) {
+            const double c = cost(current, rest.at(i));
+            if (c < bestCost) {
+                bestCost = c;
+                best = i;
+            }
+        }
+        current = rest.takeAt(best);
+        newOrder.append({current.id, current.position});
+    }
+    m_pTrackCollectionManager->internalCollection()->getPlaylistDAO().orderTracksByCurrPos(
+            m_iAutoDJPlaylistId, newOrder);
 }

@@ -12,6 +12,8 @@
 #include <QStringLiteral>
 #include <QToolButton>
 
+#include "control/controlobject.h"
+
 #include "moc_wsearchlineedit.cpp"
 #include "preferences/configobject.h"
 #include "skin/legacy/skincontext.h"
@@ -523,11 +525,25 @@ void WSearchLineEdit::setTextBlockSignals(const QString& text) {
     blockSignals(false);
 }
 
+void WSearchLineEdit::changeEvent(QEvent* pEvent) {
+    QComboBox::changeEvent(pEvent);
+    if (pEvent->type() == QEvent::EnabledChange) {
+        // The skin shows the search row exactly while the box is enabled: whatever switched the
+        // box on or off, the control follows it (it used to be set in two places, and a page
+        // change could leave the "- - -" box showing).
+        ControlObject::set(
+                ConfigKey(QStringLiteral("[Library]"), QStringLiteral("search_enabled")),
+                isEnabled() ? 1.0 : 0.0);
+    }
+}
+
 void WSearchLineEdit::slotDisableSearch() {
     if (kLogger.traceEnabled()) {
         kLogger.trace()
                 << "slotDisableSearch";
     }
+    // The skin hides the search row while there is nothing to search
+    ControlObject::set(ConfigKey(QStringLiteral("[Library]"), QStringLiteral("search_enabled")), 0.0);
     if (!isEnabled()) {
         return;
     }
@@ -542,6 +558,7 @@ void WSearchLineEdit::enableSearch(const QString& text) {
                 << "enableSearch"
                 << text;
     }
+    ControlObject::set(ConfigKey(QStringLiteral("[Library]"), QStringLiteral("search_enabled")), 1.0);
     // Set enabled BEFORE updating the edit box!
     setEnabled(true);
     updateEditBox(text);

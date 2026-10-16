@@ -389,6 +389,45 @@ mixxx::Duration PlaylistTableModel::getTotalDuration(const QModelIndexList& indi
     return mixxx::Duration::fromSeconds(durationTotal);
 }
 
+QList<QPair<int, int>> PlaylistTableModel::defaultColumnLayout() const {
+    if (m_iPlaylistId != m_pTrackCollectionManager->internalCollection()
+                                 ->getPlaylistDAO()
+                                 .getPlaylistIdFromName(AUTODJ_TABLE)) {
+        return {};
+    }
+    // 762 px in all: the table of the Auto DJ page on a 1024 px screen. The sizes follow the
+    // Rekordbox table (narrow #, square cover art, BPM, Key, Duration); the last column stretches.
+    return {
+            {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 280},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 207},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
+    };
+}
+
+int PlaylistTableModel::defaultFlexibleColumn() const {
+    // Duration, as in Rekordbox: its title is longer than its values
+    return m_iPlaylistId == m_pTrackCollectionManager->internalCollection()
+                                    ->getPlaylistDAO()
+                                    .getPlaylistIdFromName(AUTODJ_TABLE)
+            ? fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION)
+            : -1;
+}
+
+int PlaylistTableModel::defaultColumnLayoutVersion() const {
+    // 1: # / cover / title / artist / BPM / key
+    // 2: the cover column as wide as Rekordbox's (the art is square)
+    // 3: # as narrow as Rekordbox's, and Duration after Key
+    return m_iPlaylistId == m_pTrackCollectionManager->internalCollection()
+                                    ->getPlaylistDAO()
+                                    .getPlaylistIdFromName(AUTODJ_TABLE)
+            ? 3
+            : 0;
+}
+
 bool PlaylistTableModel::isColumnInternal(int column) {
     return column == fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_TRACKID) ||
             TrackSetTableModel::isColumnInternal(column);
