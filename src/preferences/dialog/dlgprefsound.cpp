@@ -160,6 +160,9 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
         buttonsHLayout->removeWidget(queryButton);
         queryButton->setParent(pCard);
         queryButton->setText(tr("Refresh Devices"));
+        queryButton->setIcon(DlgPreferences::whiteIcon(QStringLiteral(
+                ":/images/preferences/light/ic_preferences_controllers_reload.svg")));
+        queryButton->setIconSize(QSize(26, 26));
         queryButton->setToolTip(tr("Look for audio devices that were plugged in or removed"));
         pCardRow->addWidget(queryButton, 0, Qt::AlignVCenter);
         pCardLayout->addLayout(pCardRow);

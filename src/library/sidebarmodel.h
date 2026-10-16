@@ -94,6 +94,8 @@ class SidebarModel : public QAbstractItemModel {
     QModelIndex translateSourceIndex(const QModelIndex& parent);
     QModelIndex translateIndex(const QModelIndex& index, const QAbstractItemModel* model);
     void featureRenamed(LibraryFeature*);
+    // The feature whose loading started with a request to select it (see slotFeatureIsLoading())
+    LibraryFeature* m_pFeatureToSelectWhenLoaded = nullptr;
     unsigned int m_iDefaultSelectedIndex; /** Index of the item in the sidebar model to select at startup. */
 
     QTimer* const m_pressedUntilClickedTimer;

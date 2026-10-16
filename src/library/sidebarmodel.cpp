@@ -599,6 +599,7 @@ void SidebarModel::slotModelReset() {
 void SidebarModel::slotFeatureIsLoading(LibraryFeature* pFeature, bool selectFeature) {
     featureRenamed(pFeature);
     if (selectFeature) {
+        m_pFeatureToSelectWhenLoaded = pFeature;
         slotFeatureSelect(pFeature);
     }
 }
@@ -608,7 +609,13 @@ void SidebarModel::slotFeatureIsLoading(LibraryFeature* pFeature, bool selectFea
  */
 void SidebarModel::slotFeatureLoadingFinished(LibraryFeature* pFeature) {
     featureRenamed(pFeature);
-    slotFeatureSelect(pFeature);
+    // Only a feature that was asked for (tapped) takes the selection when it has loaded. One that
+    // read its drives in the background (Serato, after a drive came or went) used to highlight its
+    // own row in the sidebar while another page, e.g. Rekordbox, was on screen.
+    if (m_pFeatureToSelectWhenLoaded == pFeature) {
+        m_pFeatureToSelectWhenLoaded = nullptr;
+        slotFeatureSelect(pFeature);
+    }
 }
 
 void SidebarModel::featureRenamed(LibraryFeature* pFeature) {

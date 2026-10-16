@@ -25,6 +25,7 @@
 #include <QStyle>
 #include <QtGlobal>
 
+#include "control/controlobject.h"
 #include "controllers/dlgprefcontrollers.h"
 #include "library/library.h"
 #include "library/trackcollectionmanager.h"
@@ -923,6 +924,10 @@ void DlgPreferences::handleButtonRole(QDialogButtonBox::ButtonRole role) {
         }
         accept();
         // Same as Apply but close the dialog
+        if (kioskMode()) {
+            // The settings page (the gear) was only the way here: back to the decks.
+            ControlObject::set(ConfigKey(QStringLiteral("[Tab]"), QStringLiteral("shortcut")), 0.0);
+        }
         break;
     case QDialogButtonBox::RejectRole:
         emit cancelPreferences();
