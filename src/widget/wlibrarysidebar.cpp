@@ -197,7 +197,8 @@ bool WLibrarySidebar::ejectButtonAt(
             row.top() + 3,
             kEjectButtonWidth,
             row.height() - 6);
-    *pDrivePath = data.at(0).toString();
+    // Serato drive rows carry the drive folder as a fourth element (their first is a database file)
+    *pDrivePath = data.size() >= 4 ? data.at(3).toString() : data.at(0).toString();
     return true;
 }
 

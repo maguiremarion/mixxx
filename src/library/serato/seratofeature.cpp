@@ -15,6 +15,8 @@
 #include "library/trackcollection.h"
 #include "library/trackcollectionmanager.h"
 #include "library/treeitem.h"
+#include "library/usbdriveicon.h"
+#include "track/keyutils.h"
 #include "moc_seratofeature.cpp"
 #include "util/assert.h"
 #include "util/db/dbconnectionpooled.h"
@@ -334,7 +336,7 @@ QString parseCrate(
         const QString& databasePath,
         const QString& crateFilePath,
         const QMap<QString, int>& trackIdMap) {
-    QString crateName = QFileInfo(crateFilePath).baseName();
+    QString crateName = QFileInfo(crateFilePath).completeBaseName();
     qDebug() << "Parsing crate"
              << crateName
              << "at" << crateFilePath;
@@ -503,6 +505,7 @@ QString parseDatabase(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dat
             LIBRARYTABLE_SAMPLERATE + ", " +
             LIBRARYTABLE_BPM + ", " +
             LIBRARYTABLE_KEY + ", " +
+            LIBRARYTABLE_KEY_ID + ", " +
             TRACKLOCATIONSTABLE_LOCATION + ", " +
             LIBRARYTABLE_BPM_LOCK + ", " +
             LIBRARYTABLE_DATETIMEADDED +
@@ -522,6 +525,7 @@ QString parseDatabase(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dat
             ":samplerate, "
             ":bpm, "
             ":key, "
+            ":key_id, "
             ":location, "
             ":bpm_lock, "
             ":datetime_added, "
@@ -592,6 +596,7 @@ QString parseDatabase(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dat
                 query.bindValue(":samplerate", track.samplerate);
                 query.bindValue(":bpm", track.bpm);
                 query.bindValue(":key", track.key);
+                query.bindValue(":key_id", static_cast<int>(KeyUtils::guessKeyFromText(track.key)));
                 query.bindValue(":location", location);
                 query.bindValue(":bpm_lock", track.beatgridlocked);
                 query.bindValue(":datetime_added", track.datetimeadded);
@@ -633,24 +638,47 @@ QString parseDatabase(mixxx::DbConnectionPoolPtr dbConnectionPool, TreeItem* dat
                    << ".";
     }
 
-    // Parse Crates
+    // Under the drive: "All Tracks" and a "Crates" folder, the same shape as a Rekordbox drive.
+    // Serato writes a crate inside another as "Parent%%Child.crate", so those nest as folders
+    // (a folder that has no crate file of its own just opens and closes).
+    databaseItem->appendChild(QObject::tr("All Tracks"),
+            QList<QVariant>{QVariant(databaseFilePath), QVariant(true)});
+    TreeItem* cratesItem = databaseItem->appendChild(QObject::tr("Crates"),
+            QList<QVariant>{QVariant(QString()), QVariant(true)});
+
     QDir crateDir = QDir(databaseDir);
     if (crateDir.cd(kCrateDirectory)) {
         QStringList filters;
         filters << kCrateFilter;
-        const auto entryList = crateDir.entryList(filters);
-        for (const QString& entry : entryList) {
+        QStringList entryList = crateDir.entryList(filters);
+        // Parents before children, otherwise by name
+        entryList.sort(Qt::CaseInsensitive);
+        QMap<QString, TreeItem*> itemsByPath;
+        for (const QString& entry : std::as_const(entryList)) {
             QString crateFilePath = crateDir.filePath(entry);
             QString crateName = parseCrate(
                     database,
                     databaseDir.path(),
                     crateFilePath,
                     trackIdMap);
-            if (!crateName.isEmpty()) {
-                TreeItem* crateItem = databaseItem->appendChild(crateName,
-                        QList<QVariant>{
-                                QVariant(crateFilePath), QVariant(true)});
-                crateItem->setIcon(QIcon(":/images/library/ic_library_crates.svg"));
+            if (crateName.isEmpty()) {
+                continue;
+            }
+            const QStringList parts = crateName.split(QStringLiteral("%%"), Qt::SkipEmptyParts);
+            TreeItem* parent = cratesItem;
+            QString path;
+            for (int i = 0; i < parts.size(); ++i) {
+                path += (i ? QStringLiteral("%%") : QString()) + parts.at(i);
+                TreeItem* item = itemsByPath.value(path);
+                if (!item) {
+                    item = parent->appendChild(parts.at(i),
+                            QList<QVariant>{QVariant(QString()), QVariant(true)});
+                    itemsByPath.insert(path, item);
+                }
+                if (i == parts.size() - 1) {
+                    item->setData(QList<QVariant>{QVariant(crateFilePath), QVariant(true)});
+                }
+                parent = item;
             }
         }
     } else {
@@ -728,15 +756,30 @@ QList<TreeItem*> findSeratoDatabases() {
             continue;
         }
 
-        QString displayPath = databaseLocation.filePath();
-        if (displayPath.endsWith("/")) {
-            displayPath.chop(1);
+        QString drivePath = databaseLocation.filePath();
+        if (drivePath.endsWith("/") && drivePath.size() > 1) {
+            drivePath.chop(1);
+        }
+        // Named after the drive ("RVDIX BC"), not its mount path
+        QString label = databaseLocation.fileName();
+        if (label.isEmpty()) {
+            label = drivePath;
         }
 
-        TreeItem* foundDatabase = new TreeItem(std::move(displayPath),
+        const bool removable = drivePath.startsWith(QStringLiteral("/Volumes/")) ||
+                drivePath.startsWith(QStringLiteral("/media/")) ||
+                drivePath.startsWith(QStringLiteral("/run/media/")) ||
+                drivePath.startsWith(QStringLiteral("/mnt/")) ||
+                (drivePath.size() <= 3 && drivePath.size() >= 2 && drivePath.at(1) == QLatin1Char(':'));
+
+        // {database file, parsed yet?, drive row marker (the sidebar draws an eject button),
+        // the drive's own folder (what gets ejected)}
+        TreeItem* foundDatabase = new TreeItem(std::move(label),
                 QVariant(QList<QVariant>{
                         QVariant(databaseDir.filePath(kDatabaseFilename)),
-                        QVariant(false)}));
+                        QVariant(false),
+                        QVariant(removable ? QStringLiteral("::driveRow::") : QString()),
+                        QVariant(drivePath)}));
 
         foundDatabases << foundDatabase;
     }
@@ -764,6 +807,8 @@ bool createLibraryTable(QSqlDatabase& database, const QString& tableName) {
             "    samplerate TEXT,"
             "    bpm FLOAT,"
             "    key TEXT,"
+            // The numeric key that sorting by the Key column orders by
+            "    key_id INTEGER DEFAULT 0,"
             "    location TEXT,"
             "    bpm_lock INTEGER,"
             "    datetime_added DEFAULT CURRENT_TIMESTAMP,"
@@ -774,7 +819,11 @@ bool createLibraryTable(QSqlDatabase& database, const QString& tableName) {
             "    remixer TEXT,"
             "    size INTEGER,"
             "    tracknumber TEXT,"
-            "    serato_db TEXT"
+            "    serato_db TEXT,"
+            // Always NULL: only here so the model has Cover Art and Overview columns (the
+            // images and waveforms come from SeratoPlaylistModel)
+            "    coverart BLOB,"
+            "    wavesummaryhex BLOB"
             ");");
 
     if (!query.exec()) {
@@ -794,7 +843,11 @@ bool createPlaylistsTable(QSqlDatabase& database, const QString& tableName) {
             " ("
             "    id INTEGER PRIMARY KEY,"
             "    name TEXT,"
-            "    serato_db TEXT"
+            "    serato_db TEXT,"
+            // Always NULL: only here so the model has Cover Art and Overview columns (the
+            // images and waveforms come from SeratoPlaylistModel)
+            "    coverart BLOB,"
+            "    wavesummaryhex BLOB"
             ");");
 
     if (!query.exec()) {
@@ -862,6 +915,8 @@ SeratoFeature::SeratoFeature(
             LIBRARYTABLE_SAMPLERATE,
             LIBRARYTABLE_BPM,
             LIBRARYTABLE_KEY,
+            LIBRARYTABLE_COVERART,
+            LIBRARYTABLE_WAVESUMMARYHEX,
             LIBRARYTABLE_TRACKNUMBER,
             TRACKLOCATIONSTABLE_LOCATION,
             LIBRARYTABLE_BPM_LOCK};
@@ -1034,11 +1089,18 @@ void SeratoFeature::activateChild(const QModelIndex& index) {
     // If the second element is false, then the database does still have to be
     // parsed.
     QList<QVariant> data = item->getData().toList();
-    VERIFY_OR_DEBUG_ASSERT(data.size() == 2) {
+    VERIFY_OR_DEBUG_ASSERT(data.size() >= 2) {
         return;
     }
     QString playlist = data[0].toString();
     bool isPlaylist = data[1].toBool();
+    const bool isDriveRow = data.size() >= 3 && !data[2].toString().isEmpty();
+    if (playlist.isEmpty()) {
+        return; // a folder: the sidebar opens/closes it
+    }
+    if (isDriveRow && isPlaylist) {
+        return; // a drive that is already read: a tap only opens or closes it
+    }
 
     qDebug() << "SeratoFeature::activateChild " << item->getLabel();
 
@@ -1105,6 +1167,7 @@ void SeratoFeature::onSeratoDatabasesFound() {
                 }
             }
             if (addNewChild) {
+                pDatabaseFound->setIcon(usbDriveIcon());
                 childrenToAdd.push_back(std::move(pDatabaseFound));
             }
         }
