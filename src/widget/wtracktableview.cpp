@@ -597,7 +597,7 @@ void WTrackTableView::showLoadPopup() {
 
     // Open at the cursor, nudged back on-screen if it would overflow.
     pPopup->adjustSize();
-    QPoint pos = QCursor::pos();
+    QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
         const QRect avail = pScreen->availableGeometry();
         pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
@@ -651,7 +651,7 @@ void WTrackTableView::showAutoDJSessionPopup() {
     }
 
     pPopup->adjustSize();
-    QPoint pos = QCursor::pos();
+    QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
         const QRect avail = pScreen->availableGeometry();
         pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
@@ -791,7 +791,7 @@ void WTrackTableView::addToAutoDJSession(int what) {
                                   job->missing)
                         : tr("Not available. Is the drive with this music plugged in?");
                 if (QWidget* pWindow = window()) {
-                    WNotice::show(pWindow, text, pWindow->mapFromGlobal(QCursor::pos()), true);
+                    WNotice::show(pWindow, text, pWindow->mapFromGlobal(lastPointerPos()), true);
                 }
             }
         }
@@ -1005,7 +1005,7 @@ void WTrackTableView::showRecordingPopup() {
     Q_UNUSED(fileName);
 
     pPopup->adjustSize();
-    QPoint pos = QCursor::pos();
+    QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
         const QRect avail = pScreen->availableGeometry();
         pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
@@ -1321,7 +1321,16 @@ void WTrackTableView::onSearch(const QString& text) {
 void WTrackTableView::onShow() {
 }
 
+// Where the last press happened. QCursor::pos() is not reliable on Wayland (it has no pointer position
+// when the click came from a touch screen, so pop-ups opened in the top left corner); the press event
+// always knows.
+QPoint WTrackTableView::lastPointerPos() const {
+    return m_hasPressPos ? m_lastPressGlobalPos : QCursor::pos();
+}
+
 void WTrackTableView::mousePressEvent(QMouseEvent* pEvent) {
+    m_lastPressGlobalPos = pEvent->globalPosition().toPoint();
+    m_hasPressPos = true;
     DragAndDropHelper::mousePressed(pEvent);
     WLibraryTableView::mousePressEvent(pEvent);
 }

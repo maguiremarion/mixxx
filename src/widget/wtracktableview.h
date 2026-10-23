@@ -191,6 +191,7 @@ class WTrackTableView : public WLibraryTableView {
                           const QItemSelection &deselected) override;
 
     void mousePressEvent(QMouseEvent* pEvent) override;
+    QPoint lastPointerPos() const;
     // Mouse move event, implemented to hide the text and show an icon instead
     // when dragging.
     void mouseMoveEvent(QMouseEvent *pEvent) override;
@@ -234,5 +235,7 @@ class WTrackTableView : public WLibraryTableView {
     int m_dropRow;
 
     QTimer m_loadPopupTimer;
+    QPoint m_lastPressGlobalPos;
+    bool m_hasPressPos = false;
     bool m_recordingCopyRunning = false;
 };

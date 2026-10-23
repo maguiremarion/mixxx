@@ -1233,7 +1233,10 @@ void MixxxMainWindow::startPowerOffAfterExit() {
 }
 
 QDialog::DialogCode MixxxMainWindow::noOutputDlg(bool* continueClicked) {
-    QMessageBox msgBox;
+    // The main window is its parent: the compositor keeps a child above its parent, so a click on the
+    // launch screen behind it can no longer bring that to the front and leave the dialog hidden (that
+    // left the app stuck, with nothing on screen to click).
+    QMessageBox msgBox(this);
     msgBox.setIcon(QMessageBox::Warning);
     msgBox.setWindowTitle(tr("No audio output"));
     // Just say what is wrong; the buttons say what can be done about it.
