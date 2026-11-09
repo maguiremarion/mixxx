@@ -1,5 +1,6 @@
 #include "soundio/soundmanager.h"
 
+#include <algorithm>
 #include <QFile>
 #include <QTimer>
 #include <qlogging.h>
@@ -113,14 +114,15 @@ SoundManager::SoundManager(
 void SoundManager::watchAudio() {
     const quint64 count = m_outputCallbackCount.load(std::memory_order_relaxed);
     if (count != m_watchLastCount) {
-        // The engine is being called: all well. The supervisor script reads the age of this file to
-        // tell "the deck came back and the audio with it" from "the deck came back, the audio did not".
+        // The engine is being called by a sound card: all well. The supervisor script reads the age of this
+        // file to tell "the deck came back and the audio with it" from "the deck came back, the audio did not".
         m_watchLastCount = count;
         m_watchStalledTicks = 0;
         m_audioWasUp = true;
         if (m_audioLostLogged) {
             m_audioLostLogged = false;
-            qWarning() << "Audio output is running again";
+            qWarning() << "Audio output is running again after" << m_lostTimer.elapsed() / 1000 << "s";
+            emit audioRestored();
         }
         const QByteArray path = qgetenv("MIXXX_AUDIO_FILE");
         if (!path.isEmpty()) {
@@ -132,24 +134,49 @@ void SoundManager::watchAudio() {
         return;
     }
     // Only an output that was running can stall (nothing was ever opened, or none is configured any more,
-    // e.g. after "Continue without audio": nothing to bring back)
-    if (!m_audioWasUp || m_config.getOutputs().isEmpty()) {
+    // e.g. after "Continue without audio": nothing to bring back). Not while a setup is under way.
+    if (!m_audioWasUp || m_config.getOutputs().isEmpty() ||
+            m_pControlObjectSoundStatusCO->get() == SOUNDMANAGER_CONNECTING) {
         m_watchStalledTicks = 0;
         return;
     }
+    // A whole second without a single call: the sound card is gone.
     ++m_watchStalledTicks;
-    if (m_watchStalledTicks < 2 || (m_watchStalledTicks - 2) % 3 != 0) {
-        return; // two quiet seconds, then one try every three
-    }
-    if (!m_audioLostLogged) {
+    const bool firstTick = !m_audioLostLogged;
+    if (firstTick) {
         m_audioLostLogged = true;
-        qWarning() << "Audio output stopped (the sound card went away?): looking for it again";
+        m_lostTimer.start();
+        qWarning() << "Audio output stopped (the sound card went away?): decks paused, looking for it again";
+        // The engine is not running, so nothing could be heard anyway: pause every deck now, so that the
+        // screen says so and the music does not set off by itself the moment the card is back. (The engine
+        // reads the pause when it runs again.)
+        const int decks = std::max(2, getConfiguredDeckCount());
+        for (int deck = 1; deck <= decks; ++deck) {
+            ControlObject::set(ConfigKey(QStringLiteral("[Channel%1]").arg(deck), QStringLiteral("play")), 0.0);
+        }
+        ControlObject::set(ConfigKey(QStringLiteral("[PreviewDeck1]"), QStringLiteral("play")), 0.0);
+        // ... and the level meters, which only the running engine moves: they would stay lit where they stopped
+        for (const char* name : {"vu_meter_left", "vu_meter_right", "vu_meter"}) {
+            ControlObject::set(ConfigKey(QStringLiteral("[Main]"), QString::fromLatin1(name)), 0.0);
+        }
+        for (int deck = 1; deck <= decks; ++deck) {
+            ControlObject::set(ConfigKey(QStringLiteral("[Channel%1]").arg(deck), QStringLiteral("vu_meter")), 0.0);
+        }
+        emit audioLost();
+    }
+    // One try at once, then every three seconds
+    if (!firstTick && (m_watchStalledTicks - 1) % 3 != 0) {
+        return;
     }
     rescanHardware();
     const SoundDeviceStatus status = setupDevices();
     if (status != SoundDeviceStatus::Ok) {
         // Not back yet: leave nothing half open, look again in a few seconds
         closeDevices(false);
+        m_pControlObjectSoundStatusCO->set(SOUNDMANAGER_DISCONNECTED);
+        // The devices that did open (the network stream, which then clocks the engine) called the engine for
+        // a moment: that is not the deck coming back, so do not count those calls
+        m_watchLastCount = m_outputCallbackCount.load(std::memory_order_relaxed);
     }
 }
 

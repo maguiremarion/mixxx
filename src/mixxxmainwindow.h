@@ -137,6 +137,9 @@ class MixxxMainWindow : public QMainWindow {
     // A second logo screen laid over the skin while its widgets and the waveform windows set up
     // (a few seconds of black with stray lines in the corner), taken down shortly after startup.
     QPointer<QWidget> m_pLaunchOverlay;
+    // [Skin],blink: 1 / 0 every 0.6 s while an Auto DJ session or a recording runs (the top bar's two dots), see the constructor
+    std::unique_ptr<ControlObject> m_pBlinkControl;
+    QPointer<QWidget> m_pAudioBox; // "Audio device disconnected", see the constructor
 #ifndef __APPLE__
     Qt::WindowStates m_prevState;
 #endif

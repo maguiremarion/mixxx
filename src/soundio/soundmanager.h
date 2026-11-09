@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QSharedPointer>
 #include <QString>
+#include <QElapsedTimer>
 #include <atomic>
 #include <memory>
 
@@ -171,6 +172,15 @@ class SoundManager : public QObject {
     void outputRegistered(const AudioOutput& output, AudioSource* src);
     void inputRegistered(const AudioInput& input, AudioDestination* dest);
     void configInvalidated();
+    // The sound card went away (the DJ deck dropped off USB): the decks are paused; and it is back
+    void audioLost();
+    void audioRestored();
+
+  public:
+    // True from the moment the output stopped until it runs again (see watchAudio())
+    bool isAudioLost() const {
+        return m_audioLostLogged;
+    }
 
   private slots:
     void completeDevicesClosing();
@@ -225,6 +235,7 @@ class SoundManager : public QObject {
     int m_watchStalledTicks = 0;
     bool m_audioLostLogged = false;
     bool m_audioWasUp = false;
+    QElapsedTimer m_lostTimer;
 
     QSharedPointer<EngineNetworkStream> m_pNetworkStream;
     QSharedPointer<SoundDeviceNetwork> m_pNetworkDevice;

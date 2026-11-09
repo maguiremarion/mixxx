@@ -1,5 +1,6 @@
 #include "controllers/controllermanager.h"
 
+#include <QFileInfo>
 #include <QDir>
 #include <QSet>
 #include <QThread>
@@ -89,6 +90,26 @@ QString firstAvailableFilename(QSet<QString>& filenames,
 bool controllerCompare(Controller *a,Controller *b) {
     return a->getName() < b->getName();
 }
+
+namespace {
+#ifdef Q_OS_LINUX
+// The MIDI ports in /dev/snd, each with the time its node was made. A deck that drops off USB and comes
+// back within a second has the same names in the list at every look, but its nodes are new: the time tells,
+// and the old PortMidi handle (every message to it fails with "Host error") is then replaced.
+QString midiPortSignature() {
+    const QDir dir(QStringLiteral("/dev/snd"));
+    QStringList parts;
+    const QStringList names = dir.entryList({QStringLiteral("midiC*")}, QDir::System);
+    for (const QString& name : names) {
+        parts << name + QLatin1Char('@') +
+                        QString::number(QFileInfo(dir.filePath(name))
+                                                .metadataChangeTime()
+                                                .toMSecsSinceEpoch());
+    }
+    return parts.join(QLatin1Char(','));
+}
+#endif
+} // namespace
 
 ControllerManager::ControllerManager(UserSettingsPointer pConfig)
         : QObject(),
@@ -192,9 +213,7 @@ void ControllerManager::slotInitialize() {
     } // Mutex locker released here
 #ifdef Q_OS_LINUX
     // Watch for a controller plugged in (or out) later: its MIDI port shows up in /dev/snd.
-    m_hotplugSignature = QDir(QStringLiteral("/dev/snd"))
-                                 .entryList({QStringLiteral("midiC*")}, QDir::System)
-                                 .join(QLatin1Char(','));
+    m_hotplugSignature = midiPortSignature();
     m_hotplugPending = m_hotplugSignature;
     m_hotplugTimer.start(1500);
 #endif
@@ -352,9 +371,7 @@ void ControllerManager::slotSetUpDevices() {
 
 void ControllerManager::slotCheckHotplug() {
     DEBUG_ASSERT_THIS_QOBJECT_THREAD_AFFINITY();
-    const QString signature = QDir(QStringLiteral("/dev/snd"))
-                                      .entryList({QStringLiteral("midiC*")}, QDir::System)
-                                      .join(QLatin1Char(','));
+    const QString signature = midiPortSignature();
     if (signature == m_hotplugSignature) {
         m_hotplugPending = signature;
         return;

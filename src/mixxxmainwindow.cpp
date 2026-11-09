@@ -1,5 +1,7 @@
+#include "control/controlproxy.h"
 #include "mixxxmainwindow.h"
 
+#include <QLabel>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDebug>
@@ -197,6 +199,12 @@ MixxxMainWindow::MixxxMainWindow(std::shared_ptr<mixxx::CoreServices> pCoreServi
     // The right-hand strip of the Pi's screen is hidden behind its frame: lay everything out without it
     // (nothing happens unless MIXXX_SCREEN_INSET_RIGHT is set, see util/screeninset.h)
     mixxx::kiosk::installScreenBezel(this);
+
+    // [Skin],blink for the top bar's blinking dots (see below where it is driven). It has to exist BEFORE the
+    // skin loads: a skin that finds none makes one of its own ("already created" is then logged for ours, and
+    // ours is not the one the dots listen to).
+    m_pBlinkControl = std::make_unique<ControlObject>(
+            ConfigKey(QStringLiteral("[Skin]"), QStringLiteral("blink")));
 
     // Show launch image immediately so the user knows Mixxx is starting
     m_pSkinLoader = std::make_unique<mixxx::skin::SkinLoader>(m_pCoreServices->getSettings());
@@ -760,8 +768,13 @@ void MixxxMainWindow::initialize() {
                 return; // the box is up: it is picked up again after it closes
             }
             m_soundCards = cards;
-            qInfo() << "Sound cards changed, looking at the sound devices again";
             auto pSoundManager = m_pCoreServices->getSoundManager();
+            if (pSoundManager->isAudioLost()) {
+                // A deck that was playing is gone: SoundManager::watchAudio() has paused the decks, says so
+                // on the screen and brings the audio back when the deck is. No box, no second opinion.
+                return;
+            }
+            qInfo() << "Sound cards changed, looking at the sound devices again";
             pSoundManager->rescanHardware();
             pSoundManager->setupDevices();
             const bool outputOpen =
@@ -787,6 +800,88 @@ void MixxxMainWindow::initialize() {
         pSoundWatch->start();
     }
 #endif
+
+    // The blinking dots in the top bar (Auto DJ session, recording) both follow [Skin],blink. It only moves while
+    // one of them is on, so nothing wakes up the rest of the time. (A ControlObject is not told about its own
+    // set(), hence the proxies on the two flags.)
+    {
+        auto* pBlinkTimer = new QTimer(this);
+        pBlinkTimer->setInterval(600);
+        connect(pBlinkTimer, &QTimer::timeout, this, [this]() {
+            m_pBlinkControl->set(m_pBlinkControl->get() > 0.5 ? 0.0 : 1.0);
+        });
+        auto* pSession = new ControlProxy(
+                ConfigKey(QStringLiteral("[AutoDJ]"), QStringLiteral("session_active")), this);
+        auto* pRecording = new ControlProxy(
+                ConfigKey(QStringLiteral("[Recording]"), QStringLiteral("status")), this);
+        const auto update = [this, pBlinkTimer, pSession, pRecording]() {
+            if (pSession->get() > 0.5 || pRecording->get() > 0.5) {
+                if (!pBlinkTimer->isActive()) {
+                    m_pBlinkControl->set(1.0);
+                    pBlinkTimer->start();
+                }
+            } else {
+                pBlinkTimer->stop();
+                m_pBlinkControl->set(0.0);
+            }
+        };
+        pSession->connectValueChanged(this, update);
+        pRecording->connectValueChanged(this, update);
+        update();
+    }
+
+    // The deck dropped off USB (SoundManager::watchAudio() has paused the decks): say so in a small window of
+    // its own in the middle of the screen (the big waveforms are native windows that draw over anything placed
+    // on the main window), and say when it is back. It takes no taps, so the menus stay usable meanwhile.
+    {
+        auto* pHide = new QTimer(this);
+        pHide->setSingleShot(true);
+        const auto showBox = [this, pHide](const QString& text, int hideAfterMs) {
+            if (!m_pAudioBox) {
+                // A tool tip window: unlike a dialog it can be put where it should be (the compositor
+                // places dialogs itself, in the middle)
+                auto* pBox = new QLabel(this,
+                        Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowDoesNotAcceptFocus |
+                                Qt::WindowTransparentForInput);
+                pBox->setObjectName(QStringLiteral("AudioDeviceBox"));
+                pBox->setAttribute(Qt::WA_ShowWithoutActivating);
+                pBox->setAlignment(Qt::AlignCenter);
+                pBox->setStyleSheet(QStringLiteral(
+                        "#AudioDeviceBox { background-color: #1c1c1c; color: #e5e6ea; "
+                        "border: 1px solid #2e2e34; padding: 20px 36px; font-size: 20px; }"));
+                m_pAudioBox = pBox;
+            }
+            auto* pLabel = static_cast<QLabel*>(m_pAudioBox.data());
+            pLabel->setText(text);
+            pLabel->adjustSize();
+            // Top middle of the LIT part of the screen (the right-hand strip behind the frame is dead),
+            // just under the top bar: nothing in Preferences or the pages is covered
+            pLabel->move(mapToGlobal(QPoint(contentsRect().center().x() - pLabel->width() / 2, 60)));
+            pLabel->show();
+            pLabel->raise();
+            pHide->stop();
+            if (hideAfterMs > 0) {
+                pHide->start(hideAfterMs);
+            }
+        };
+        connect(pHide, &QTimer::timeout, this, [this]() {
+            if (m_pAudioBox) {
+                m_pAudioBox->hide();
+            }
+        });
+        connect(m_pCoreServices->getSoundManager().get(),
+                &SoundManager::audioLost,
+                this,
+                [showBox]() {
+                    showBox(tr("Audio device disconnected\nTracks paused until it is reconnected"), 0);
+                });
+        connect(m_pCoreServices->getSoundManager().get(),
+                &SoundManager::audioRestored,
+                this,
+                [showBox]() {
+                    showBox(tr("Audio device connected"), 2500);
+                });
+    }
 
     // Keep the logo up while the skin appears: replacing the launch image shows a black window
     // with half-drawn widgets for a couple of seconds while the waveform windows initialise.
