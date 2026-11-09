@@ -354,7 +354,7 @@ void DlgAutoDJ::applyKioskLayout() {
     m_pEndBtn = makeButton(tr("END SESSION"), "AutoDjEndBtn");
     // As wide as its longer text ("TAP AGAIN TO END"), so the second tap does not push the other
     // controls over
-    m_pEndBtn->setFixedSize(150, 32);
+    m_pEndBtn->setFixedSize(150, 40); // as tall as SMART ORDER
     pBarRow->addWidget(m_pEndBtn);
     pSession->addLayout(pBarRow);
 

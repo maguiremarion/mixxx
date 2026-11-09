@@ -3,6 +3,7 @@
 #include <QMenu>
 #include <QtDebug>
 
+#include "control/controlpushbutton.h"
 #include "controllers/keyboard/keyboardeventfilter.h"
 #include "library/autodj/autodjprocessor.h"
 #include "library/autodj/dlgautodj.h"
@@ -68,6 +69,14 @@ AutoDJFeature::AutoDJFeature(Library* pLibrary,
             Qt::QueuedConnection);
 
     m_playlistDao.setAutoDJProcessor(m_pAutoDJProcessor);
+
+    m_pShowPage = std::make_unique<ControlPushButton>(ConfigKey(QStringLiteral("[AutoDJ]"), QStringLiteral("show_page")));
+    connect(m_pShowPage.get(), &ControlObject::valueChanged, this, [this](double pressed) {
+        if (pressed > 0.5) {
+            emit featureIsLoading(this, true); // selects the row in the sidebar
+            activate();
+        }
+    });
 
     // Create the "Crates" tree-item under the root item.
     std::unique_ptr<TreeItem> pRootItem = TreeItem::newRoot(this);

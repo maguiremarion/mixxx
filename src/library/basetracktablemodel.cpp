@@ -453,7 +453,9 @@ QVariant BaseTrackTableModel::data(
                 index,
                 ColumnCache::COLUMN_LIBRARYTABLE_COLOR);
         const auto rgbColor = mixxx::RgbColor::fromQVariant(rgbColorValue);
-        if (!rgbColor) {
+        // No colour, or black: the same plain stripes (Rekordbox stores "no colour" as black, which used to tint
+        // its rows 40 % darker than the rest of the library's)
+        if (!rgbColor || *rgbColor == mixxx::RgbColor(0)) {
             return QVariant();
         }
         auto bgColor = mixxx::RgbColor::toQColor(rgbColor);

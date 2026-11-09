@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QList>
+#include <memory>
 #include <QObject>
 #include <QPointer>
 #include <QUrl>
@@ -17,6 +18,7 @@ class Library;
 class PlayerManagerInterface;
 class TrackCollection;
 class AutoDJProcessor;
+class ControlPushButton;
 class WLibrarySidebar;
 class QAction;
 class QModelIndex;
@@ -66,6 +68,9 @@ class AutoDJFeature : public LibraryFeature {
     parented_ptr<TreeItemModel> m_pSidebarModel;
     DlgAutoDJ* m_pAutoDJView;
     const QString m_viewName;
+    // [AutoDJ],show_page: a press goes to the Auto DJ page and selects its row in the sidebar (the top bar's
+    // Auto DJ indicator; the skin switches to the Browse tab itself)
+    std::unique_ptr<ControlPushButton> m_pShowPage;
 
     // Initialize the list of crates loaded into the auto-DJ queue.
     void constructCrateChildModel();
