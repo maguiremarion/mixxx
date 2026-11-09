@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QSharedPointer>
 #include <QString>
+#include <atomic>
 #include <memory>
 
 #include "audio/types.h"
@@ -23,6 +24,7 @@
 class EngineMixer;
 class ControlObject;
 class PipewireEnumerator;
+class QTimer;
 
 #define SOUNDMANAGER_DISCONNECTED 0
 #define SOUNDMANAGER_CONNECTING 1
@@ -172,6 +174,11 @@ class SoundManager : public QObject {
 
   private slots:
     void completeDevicesClosing();
+    // Once a second (only with MIXXX_AUDIO_RECOVERY=1, set by the Pi's supervisor): has the engine
+    // stopped being called? Then the sound card went away (the DJ deck dropped off USB and came back):
+    // look for the hardware again and open the configured devices again. Without this the engine stays
+    // stopped for good: play / pause do nothing, the meters stick, but the screen keeps drawing.
+    void watchAudio();
 
   public slots:
     void addDevice(SoundDevicePointer pDevice);
@@ -210,6 +217,14 @@ class SoundManager : public QObject {
     PollingControlProxy m_audioLatencyOverload;
 
     std::unique_ptr<SoundDeviceEnumerator> m_pEnumerator;
+
+    // Audio recovery (see watchAudio())
+    std::atomic<quint64> m_outputCallbackCount{0};
+    QTimer* m_pAudioWatch = nullptr;
+    quint64 m_watchLastCount = 0;
+    int m_watchStalledTicks = 0;
+    bool m_audioLostLogged = false;
+    bool m_audioWasUp = false;
 
     QSharedPointer<EngineNetworkStream> m_pNetworkStream;
     QSharedPointer<SoundDeviceNetwork> m_pNetworkDevice;

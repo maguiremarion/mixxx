@@ -1,5 +1,7 @@
 #include "soundio/soundmanager.h"
 
+#include <QFile>
+#include <QTimer>
 #include <qlogging.h>
 
 #include <QLibrary>
@@ -99,6 +101,56 @@ SoundManager::SoundManager(
     // previously configured devices were not found.
     // Write new config after MixxxMainWindow::noOutputDlg where the user has
     // a chance to keep the previous sound config (exit).
+
+    if (qEnvironmentVariableIntValue("MIXXX_AUDIO_RECOVERY") > 0) {
+        m_pAudioWatch = new QTimer(this);
+        m_pAudioWatch->setInterval(1000);
+        connect(m_pAudioWatch, &QTimer::timeout, this, &SoundManager::watchAudio);
+        m_pAudioWatch->start();
+    }
+}
+
+void SoundManager::watchAudio() {
+    const quint64 count = m_outputCallbackCount.load(std::memory_order_relaxed);
+    if (count != m_watchLastCount) {
+        // The engine is being called: all well. The supervisor script reads the age of this file to
+        // tell "the deck came back and the audio with it" from "the deck came back, the audio did not".
+        m_watchLastCount = count;
+        m_watchStalledTicks = 0;
+        m_audioWasUp = true;
+        if (m_audioLostLogged) {
+            m_audioLostLogged = false;
+            qWarning() << "Audio output is running again";
+        }
+        const QByteArray path = qgetenv("MIXXX_AUDIO_FILE");
+        if (!path.isEmpty()) {
+            QFile file(QString::fromLocal8Bit(path));
+            if (file.open(QIODevice::WriteOnly)) {
+                file.close();
+            }
+        }
+        return;
+    }
+    // Only an output that was running can stall (nothing was ever opened, or none is configured any more,
+    // e.g. after "Continue without audio": nothing to bring back)
+    if (!m_audioWasUp || m_config.getOutputs().isEmpty()) {
+        m_watchStalledTicks = 0;
+        return;
+    }
+    ++m_watchStalledTicks;
+    if (m_watchStalledTicks < 2 || (m_watchStalledTicks - 2) % 3 != 0) {
+        return; // two quiet seconds, then one try every three
+    }
+    if (!m_audioLostLogged) {
+        m_audioLostLogged = true;
+        qWarning() << "Audio output stopped (the sound card went away?): looking for it again";
+    }
+    rescanHardware();
+    const SoundDeviceStatus status = setupDevices();
+    if (status != SoundDeviceStatus::Ok) {
+        // Not back yet: leave nothing half open, look again in a few seconds
+        closeDevices(false);
+    }
 }
 
 SoundManager::~SoundManager() {
@@ -564,6 +616,7 @@ void SoundManager::checkConfig() {
 }
 
 void SoundManager::onDeviceOutputCallback(const SINT iFramesPerBuffer) {
+    m_outputCallbackCount.fetch_add(1, std::memory_order_relaxed);
     // Produce a block of samples for output. EngineMixer expects stereo
     // samples so multiply iFramesPerBuffer by 2.
     m_pEngineMixer->process(iFramesPerBuffer * 2);
