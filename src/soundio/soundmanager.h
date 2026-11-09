@@ -181,6 +181,13 @@ class SoundManager : public QObject {
     bool isAudioLost() const {
         return m_audioLostLogged;
     }
+    // Bluetooth mode (a phone plays through the PA): the deck's sound card is let go so that the system's
+    // sound server can use it, and taken back (retrying until the server has let it go) when it is over.
+    void suspendOutput();
+    void resumeOutput();
+    bool isOutputSuspended() const {
+        return m_outputSuspended;
+    }
 
   private slots:
     void completeDevicesClosing();
@@ -235,6 +242,9 @@ class SoundManager : public QObject {
     int m_watchStalledTicks = 0;
     bool m_audioLostLogged = false;
     bool m_audioWasUp = false;
+    bool m_outputSuspended = false;
+    bool m_resumePending = false;
+    bool tryResume();
     QElapsedTimer m_lostTimer;
 
     QSharedPointer<EngineNetworkStream> m_pNetworkStream;

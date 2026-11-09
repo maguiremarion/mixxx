@@ -131,6 +131,38 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
           m_loading(false),
           m_configValid(true) {
     setupUi(this);
+    // While a phone plays over Bluetooth the sound server has the deck's sound card (the player let it go), so this page
+    // cannot use it: say so, since the deck is still the output
+    {
+        auto* pNote = new QLabel(
+                tr("Bluetooth is playing through the deck. Sound settings are available again once you return to the decks."),
+                this);
+        pNote->setObjectName(QStringLiteral("SoundBluetoothNote"));
+        pNote->setWordWrap(true);
+        pNote->setStyleSheet(QStringLiteral(
+                "#SoundBluetoothNote { background-color: #1c1c1c; color: #e5e6ea; border: 1px solid #3478f2; "
+                "padding: 10px 14px; font-size: 15px; }"));
+        verticalLayout_2->insertWidget(0, pNote);
+        auto* pBtActive = new ControlProxy(ConfigKey(QStringLiteral("[Skin]"), QStringLiteral("bt_active")), this);
+        // The page is greyed out meanwhile and takes no taps (a shade over it: the page itself switches single widgets
+        // on again whenever it loads); the note stays on top and readable
+        m_pBluetoothShade = new QWidget(this);
+        m_pBluetoothShade->setAttribute(Qt::WA_StyledBackground, true);
+        m_pBluetoothShade->setStyleSheet(QStringLiteral("background-color: rgba(24, 24, 24, 200);"));
+        m_pBluetoothShade->hide();
+        const auto showNote = [this, pNote, pBtActive]() {
+            const bool bluetooth = pBtActive->get() > 0.5;
+            m_pBluetoothShade->setGeometry(rect());
+            m_pBluetoothShade->setVisible(bluetooth);
+            pNote->setVisible(bluetooth);
+            if (bluetooth) {
+                m_pBluetoothShade->raise();
+                pNote->raise();
+            }
+        };
+        pBtActive->connectValueChanged(this, showNote);
+        showNote();
+    }
     if (DlgPreferences::kioskMode()) {
         // What this page is for, in a sentence, and none of the hint texts: the page keeps the
         // measured latency and the buffer underflow counter.
@@ -664,6 +696,13 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
 }
 
 /// Slot called when the preferences dialog is opened.
+void DlgPrefSound::resizeEvent(QResizeEvent* pEvent) {
+    DlgPreferencePage::resizeEvent(pEvent);
+    if (m_pBluetoothShade) {
+        m_pBluetoothShade->setGeometry(rect());
+    }
+}
+
 void DlgPrefSound::slotUpdate() {
     m_bSkipConfigClear = true;
     loadSettings();

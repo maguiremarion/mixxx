@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Bluetooth rune, one flat light colour like the other sidebar icons -->
+  <path d="M9 10.5 L22.5 22 L16 28 L16 4 L22.5 10 L9 21.5" fill="none" stroke="#e5e6ea" stroke-width="2.6"
+        stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

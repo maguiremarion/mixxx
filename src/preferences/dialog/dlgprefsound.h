@@ -102,7 +102,13 @@ class DlgPrefSound : public DlgPreferencePage, public Ui::DlgPrefSoundDlg  {
     void updateSampleRates(const QList<mixxx::audio::SampleRate>& sampleRates);
     void invalidateConfig();
 
+  protected:
+    void resizeEvent(QResizeEvent* pEvent) override;
+
   private:
+    // Greys the page out and takes its taps while a phone plays over Bluetooth (the player does not have the sound card then)
+    QWidget* m_pBluetoothShade = nullptr;
+
     void initializePaths();
     void connectSoundItem(DlgPrefSoundItem *item);
     void loadSettings(const SoundManagerConfig &config);

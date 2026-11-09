@@ -111,8 +111,49 @@ SoundManager::SoundManager(
     }
 }
 
+void SoundManager::suspendOutput() {
+    qWarning() << "Sound output let go for Bluetooth";
+    m_outputSuspended = true;
+    m_resumePending = false;
+    m_watchStalledTicks = 0;
+    m_audioLostLogged = false;
+    closeDevices(false);
+    m_pControlObjectSoundStatusCO->set(SOUNDMANAGER_DISCONNECTED);
+}
+
+void SoundManager::resumeOutput() {
+    qWarning() << "Taking the sound output back from Bluetooth";
+    m_outputSuspended = false;
+    m_resumePending = true;
+    m_audioLostLogged = false;
+    tryResume();
+}
+
+bool SoundManager::tryResume() {
+    rescanHardware();
+    if (setupDevices() == SoundDeviceStatus::Ok) {
+        m_resumePending = false;
+        m_watchStalledTicks = 0;
+        m_watchLastCount = m_outputCallbackCount.load(std::memory_order_relaxed);
+        return true;
+    }
+    // Not yet (the sound server lets a card go a few seconds after its last stream): try again at the next tick
+    closeDevices(false);
+    m_pControlObjectSoundStatusCO->set(SOUNDMANAGER_DISCONNECTED);
+    m_watchLastCount = m_outputCallbackCount.load(std::memory_order_relaxed);
+    return false;
+}
+
 void SoundManager::watchAudio() {
     const quint64 count = m_outputCallbackCount.load(std::memory_order_relaxed);
+    if (m_outputSuspended) {
+        m_watchLastCount = count; // let go on purpose: nothing to watch
+        return;
+    }
+    if (m_resumePending) {
+        tryResume();
+        return;
+    }
     if (count != m_watchLastCount) {
         // The engine is being called by a sound card: all well. The supervisor script reads the age of this
         // file to tell "the deck came back and the audio with it" from "the deck came back, the audio did not".
@@ -616,6 +657,11 @@ SoundDeviceStatus SoundManager::setConfig(const SoundManagerConfig& config) {
     SoundDeviceStatus status = SoundDeviceStatus::Ok;
     m_config = config;
     checkConfig();
+    if (m_outputSuspended) {
+        // Bluetooth has the sound card: keep the settings, they are applied when the decks get it back
+        m_config.writeToDisk();
+        return SoundDeviceStatus::Ok;
+    }
 
     closeActiveConfig();
 

@@ -21,6 +21,8 @@
 #include "library/libraryfeature.h"
 #include "library/mixxxlibraryfeature.h"
 #include "library/recording/recordingfeature.h"
+#include "bluetooth/bluetoothfeature.h"
+#include "bluetooth/bluetoothsession.h"
 #include "library/rekordbox/rekordboxfeature.h"
 #include "library/rhythmbox/rhythmboxfeature.h"
 #include "library/serato/seratofeature.h"
@@ -150,6 +152,10 @@ Library::Library(
     addFeature(m_pBrowseFeature);
 
     addFeature(new RecordingFeature(this, m_pConfig, pRecordingManager));
+
+    if (BluetoothSession::enabled()) {
+        addFeature(new BluetoothFeature(this, m_pConfig)); // the Pi as a Bluetooth speaker
+    }
 
     addFeature(new SetlogFeature(this, UserSettingsPointer(m_pConfig)));
 
@@ -485,7 +491,7 @@ void Library::buildSidebar() {
     const QStringList order =
             (m_pConfig->exists(ConfigKey(kConfigGroup, "SidebarOrder"))
                             ? m_pConfig->getValueString(ConfigKey(kConfigGroup, "SidebarOrder"))
-                            : QStringLiteral("rekordbox,serato,computer,autodj,recordings,history"))
+                            : QStringLiteral("rekordbox,serato,computer,autodj,bluetooth,recordings,history"))
                     .toLower()
                     .split(QChar(','), Qt::SkipEmptyParts);
     const QStringList hidden =
@@ -548,6 +554,8 @@ void Library::addFeature(LibraryFeature* feature) {
         sidebarId = QStringLiteral("analyze");
     } else if (dynamic_cast<RecordingFeature*>(feature)) {
         sidebarId = QStringLiteral("recordings");
+    } else if (dynamic_cast<BluetoothFeature*>(feature)) {
+        sidebarId = QStringLiteral("bluetooth");
     } else if (dynamic_cast<SetlogFeature*>(feature)) {
         sidebarId = QStringLiteral("history");
     } else if (dynamic_cast<RekordboxFeature*>(feature)) {

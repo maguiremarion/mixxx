@@ -4,6 +4,7 @@
 #include <QPointer>
 #include <QString>
 #include <QTimer>
+#include <functional>
 #include <memory>
 
 #include "preferences/constants.h"
@@ -11,6 +12,7 @@
 #include "track/track_decl.h"
 #include "util/parented_ptr.h"
 
+class BluetoothNowPlaying;
 class ControlObject;
 class ControlProxy;
 class ControlPushButton;
@@ -109,6 +111,8 @@ class MixxxMainWindow : public QMainWindow {
     bool eventFilter(QObject *obj, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void resizeEvent(QResizeEvent* pEvent) override;
+    void enterBluetoothMode();
+    void exitBluetoothMode();
 
   private:
     void initializeWindow();
@@ -139,6 +143,12 @@ class MixxxMainWindow : public QMainWindow {
     QPointer<QWidget> m_pLaunchOverlay;
     // [Skin],blink: 1 / 0 every 0.6 s while an Auto DJ session or a recording runs (the top bar's two dots), see the constructor
     std::unique_ptr<ControlObject> m_pBlinkControl;
+    // Bluetooth mode, see enterBluetoothMode()
+    std::unique_ptr<ControlObject> m_pBtActiveControl;
+    BluetoothNowPlaying* m_pBtNowPlaying = nullptr;
+    std::function<void()> m_btPlace;
+    bool m_btMode = false;
+    bool m_btBackSuppress = false;
     QPointer<QWidget> m_pAudioBox; // "Audio device disconnected", see the constructor
 #ifndef __APPLE__
     Qt::WindowStates m_prevState;

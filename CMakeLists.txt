@@ -1217,6 +1217,10 @@ add_library(
   src/audio/frame.cpp
   src/audio/signalinfo.cpp
   src/audio/streaminfo.cpp
+  src/bluetooth/bluetoothfeature.cpp
+  src/bluetooth/bluetoothnowplaying.cpp
+  src/bluetooth/bluetoothsession.cpp
+  src/bluetooth/dlgbluetooth.cpp
   src/audio/types.cpp
   src/control/control.cpp
   src/control/controlaudiotaperpot.cpp

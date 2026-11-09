@@ -1,3 +1,5 @@
+#include "bluetooth/bluetoothsession.h"
+#include "bluetooth/bluetoothnowplaying.h"
 #include "control/controlproxy.h"
 #include "mixxxmainwindow.h"
 
@@ -205,6 +207,9 @@ MixxxMainWindow::MixxxMainWindow(std::shared_ptr<mixxx::CoreServices> pCoreServi
     // ours is not the one the dots listen to).
     m_pBlinkControl = std::make_unique<ControlObject>(
             ConfigKey(QStringLiteral("[Skin]"), QStringLiteral("blink")));
+    // [Skin],bt_active: 1 while a phone plays over Bluetooth (the skin hides the decks then; see below)
+    m_pBtActiveControl = std::make_unique<ControlObject>(
+            ConfigKey(QStringLiteral("[Skin]"), QStringLiteral("bt_active")));
 
     // Show launch image immediately so the user knows Mixxx is starting
     m_pSkinLoader = std::make_unique<mixxx::skin::SkinLoader>(m_pCoreServices->getSettings());
@@ -681,9 +686,17 @@ void MixxxMainWindow::initialize() {
     // Sound hardware setup
     // Try to open configured devices. If that fails, display dialogs
     // that allow to either retry, reconfigure devices or exit.
+    // A phone that is already playing over Bluetooth has the deck's sound card (the system's sound server opened it
+    // for the phone): trying to open it here would fail and ask "no audio output". Bluetooth mode (below) starts
+    // instead, and the player takes the card when the phone is done.
+    BluetoothSession* pBtAtStart = BluetoothSession::instance();
+    const bool phonePlayingAtStart = pBtAtStart && pBtAtStart->connected() && pBtAtStart->playing();
     bool retryClicked;
     do {
         retryClicked = false;
+        if (phonePlayingAtStart) {
+            break;
+        }
         SoundDeviceStatus result = m_pCoreServices->getSoundManager()->setupDevices();
         const bool outputOpen =
                 ControlObject::get(ConfigKey(QStringLiteral("[SoundManager]"),
@@ -691,7 +704,11 @@ void MixxxMainWindow::initialize() {
         if (result == SoundDeviceStatus::ErrorDeviceCount) {
             // A saved device is not there (the deck is not plugged in). When an output did open
             // that is fine; when none did, it is the same plain question as with no output set up.
-            if (!outputOpen) {
+            if (!outputOpen && pBtAtStart && pBtAtStart->connected()) {
+                // A phone is connected: the system's sound server may be holding the deck's sound card for it
+                // (it lets go a few seconds after the phone's last sound). Not "no audio output": keep trying quietly.
+                m_pCoreServices->getSoundManager()->resumeOutput();
+            } else if (!outputOpen) {
                 bool continueClicked = false;
                 m_noOutputBoxOpen = true;
                 const bool accepted = noOutputDlg(&continueClicked) == QDialog::Accepted;
@@ -769,7 +786,7 @@ void MixxxMainWindow::initialize() {
             }
             m_soundCards = cards;
             auto pSoundManager = m_pCoreServices->getSoundManager();
-            if (pSoundManager->isAudioLost()) {
+            if (pSoundManager->isAudioLost() || pSoundManager->isOutputSuspended()) {
                 // A deck that was playing is gone: SoundManager::watchAudio() has paused the decks, says so
                 // on the screen and brings the audio back when the deck is. No box, no second opinion.
                 return;
@@ -828,6 +845,49 @@ void MixxxMainWindow::initialize() {
         pSession->connectValueChanged(this, update);
         pRecording->connectValueChanged(this, update);
         update();
+    }
+
+    // Bluetooth mode (the Pi on the Pi only): a phone that plays over Bluetooth takes the Decks page. The decks are
+    // paused and the player lets go of the deck's sound card so the phone's sound reaches the speakers; the top bar
+    // stays, so BROWSE and the gear work as ever. See BluetoothNowPlaying and pi/pi-files/rvdix-bt.py.
+    if (BluetoothSession* pBt = BluetoothSession::instance()) {
+        m_pBtNowPlaying = new BluetoothNowPlaying(this);
+        m_pBtNowPlaying->hide();
+        auto* pTab = new ControlProxy(ConfigKey(QStringLiteral("[Tab]"), QStringLiteral("overview")), this);
+        const auto place = [this]() {
+            constexpr int kTopBarHeight = 52;
+            const QRect area = contentsRect();
+            m_pBtNowPlaying->setGeometry(area.left(), kTopBarHeight, area.width(), height() - kTopBarHeight);
+        };
+        const auto showOrHide = [this, pTab, place]() {
+            const bool show = m_btMode && pTab->get() > 0.5; // only on the Decks tab
+            if (show) {
+                place();
+                m_pBtNowPlaying->show();
+                m_pBtNowPlaying->raise();
+            } else {
+                m_pBtNowPlaying->hide();
+            }
+        };
+        m_btPlace = place;
+        connect(m_pBtNowPlaying, &BluetoothNowPlaying::backRequested, this, [this, pBt]() {
+            m_btBackSuppress = true; // do not go back into Bluetooth mode when the phone reconnects by itself
+            pBt->disconnectDevice();
+        });
+        const auto update = [this, pBt, showOrHide]() {
+            if (!pBt->connected()) {
+                m_btBackSuppress = false;
+            }
+            if (!m_btMode && pBt->connected() && pBt->playing() && !m_btBackSuppress) {
+                enterBluetoothMode();
+            } else if (m_btMode && !pBt->connected()) {
+                exitBluetoothMode();
+            }
+            showOrHide();
+        };
+        connect(pBt, &BluetoothSession::changed, this, update);
+        pTab->connectValueChanged(this, showOrHide);
+        update(); // a phone that was already playing when the player started
     }
 
     // The deck dropped off USB (SoundManager::watchAudio() has paused the decks): say so in a small window of
@@ -1009,8 +1069,49 @@ void MixxxMainWindow::initialize() {
     }
 }
 
+void MixxxMainWindow::enterBluetoothMode() {
+    BluetoothSession* pBt = BluetoothSession::instance();
+    if (!pBt || m_btMode) {
+        return;
+    }
+    qWarning() << "Bluetooth mode: a phone is playing";
+    m_btMode = true;
+    for (int deck = 1; deck <= 4; ++deck) {
+        ControlObject::set(ConfigKey(QStringLiteral("[Channel%1]").arg(deck), QStringLiteral("play")), 0.0);
+    }
+    m_pBtActiveControl->set(1.0);
+    ControlObject::set(ConfigKey(QStringLiteral("[Tab]"), QStringLiteral("overview")), 1.0); // the Decks page is the now playing page
+    m_pCoreServices->getSoundManager()->suspendOutput();
+    // The phone started playing while the player still had the sound card: its stream is linked to the output but the
+    // output stays asleep. A moment after the card is free, play a moment of silence to the output (the helper does)
+    // and the phone's stream goes active. (Pausing and playing the phone does not do it.)
+    QTimer::singleShot(400, this, [this, pBt]() {
+        if (m_btMode && pBt->connected()) {
+            pBt->wakeOutput();
+        }
+    });
+    QTimer::singleShot(2500, this, [this, pBt]() { // once more, in case the card took longer to let go
+        if (m_btMode && pBt->connected()) {
+            pBt->wakeOutput();
+        }
+    });
+}
+
+void MixxxMainWindow::exitBluetoothMode() {
+    if (!m_btMode) {
+        return;
+    }
+    qWarning() << "Bluetooth mode over: the decks get the sound back";
+    m_btMode = false;
+    m_pBtActiveControl->set(0.0);
+    m_pCoreServices->getSoundManager()->resumeOutput();
+}
+
 void MixxxMainWindow::resizeEvent(QResizeEvent* pEvent) {
     QMainWindow::resizeEvent(pEvent);
+    if (m_btPlace && m_pBtNowPlaying && m_pBtNowPlaying->isVisible()) {
+        m_btPlace();
+    }
     if (m_pLaunchOverlay) {
         m_pLaunchOverlay->setGeometry(rect());
     }
