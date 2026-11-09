@@ -1,4 +1,5 @@
 #include "widget/wtracktableview.h"
+#include "util/screeninset.h"
 
 #ifdef Q_OS_UNIX
 #include <unistd.h>
@@ -302,6 +303,18 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* pNewModel, bool restore
     setHorizontalHeader(tempHeader);
 
     setModel(pNewModel);
+    // Which colours this page's rows really get (the skin sets one pair for every table): logged once
+    // per page so a page that differs from the others can be told from the log (RVDIX_ROW_DEBUG=1).
+    if (qEnvironmentVariableIntValue("RVDIX_ROW_DEBUG") > 0) {
+        QTimer::singleShot(1500, this, [this, ns = pNewTrackModel->settingsNamespace()]() {
+            QVariant bg0 = model() && model()->rowCount() > 0 ? model()->index(0, 0).data(Qt::BackgroundRole) : QVariant();
+            QVariant bg1 = model() && model()->rowCount() > 1 ? model()->index(1, 0).data(Qt::BackgroundRole) : QVariant();
+            qWarning() << "Row colours" << ns << "alternating" << alternatingRowColors()
+                       << "base" << palette().color(QPalette::Base).name()
+                       << "alternate" << palette().color(QPalette::AlternateBase).name()
+                       << "object" << objectName() << "row0 bg" << bg0 << "row1 bg" << bg1;
+        });
+    }
     setHorizontalHeader(pHeader);
     pHeader->setSectionsMovable(true);
     pHeader->setSectionsClickable(true);
@@ -599,7 +612,7 @@ void WTrackTableView::showLoadPopup() {
     pPopup->adjustSize();
     QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
-        const QRect avail = pScreen->availableGeometry();
+        const QRect avail = mixxx::kiosk::screenMinusInset(pScreen->availableGeometry());
         pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
         pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
     }
@@ -653,7 +666,7 @@ void WTrackTableView::showAutoDJSessionPopup() {
     pPopup->adjustSize();
     QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
-        const QRect avail = pScreen->availableGeometry();
+        const QRect avail = mixxx::kiosk::screenMinusInset(pScreen->availableGeometry());
         pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
         pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
     }
@@ -1007,7 +1020,7 @@ void WTrackTableView::showRecordingPopup() {
     pPopup->adjustSize();
     QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
-        const QRect avail = pScreen->availableGeometry();
+        const QRect avail = mixxx::kiosk::screenMinusInset(pScreen->availableGeometry());
         pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
         pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
     }

@@ -1,4 +1,5 @@
 #include "preferences/dialog/dlgpreferences.h"
+#include "util/screeninset.h"
 
 #include <QAbstractItemView>
 #include <QApplication>
@@ -1064,6 +1065,9 @@ void DlgPreferences::setVisible(bool visible) {
     const bool kiosk = visible && kioskPreferencesEnabled();
     if (kiosk && !isFullScreen()) {
         setWindowState(windowState() | Qt::WindowFullScreen);
+    }
+    if (kiosk) {
+        mixxx::kiosk::installScreenBezel(this); // the strip behind the screen's frame
     }
     if (kiosk) {
         stripLinks();

@@ -354,7 +354,7 @@ CoverInfo SeratoPlaylistModel::getCoverInfo(const QModelIndex& index) const {
 
 QList<QPair<int, int>> SeratoPlaylistModel::defaultColumnLayout() const {
     // Same as the Rekordbox view (see RekordboxPlaylistModel::defaultColumnLayout()): the table
-    // is 766 px wide on a 1024 px screen and these add up to 764. Bump
+    // is 735 px wide on the Pi's screen (31 px of it are behind the frame) and these add up to 733. Bump
     // defaultColumnLayoutVersion() when changing this so it replaces saved layouts.
     return {
             {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
@@ -364,7 +364,7 @@ QList<QPair<int, int>> SeratoPlaylistModel::defaultColumnLayout() const {
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 156},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 125},
     };
 }
 
@@ -373,5 +373,6 @@ int SeratoPlaylistModel::defaultFlexibleColumn() const {
 }
 
 int SeratoPlaylistModel::defaultColumnLayoutVersion() const {
-    return 1;
+    // 2: Overview 156 -> 125 (the table is 735 px wide now)
+    return 2;
 }

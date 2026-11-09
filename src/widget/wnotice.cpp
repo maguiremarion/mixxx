@@ -39,13 +39,13 @@ void show(QWidget* pWindow, const QString& text, const QPoint& anchor, bool cent
     }
     const int chrome = 2 * 14 + 2 * 1 + 20; // left/right padding + border + slack (the text is
                                             // a little wider than the plain metrics say)
-    s_pLabel->setFixedWidth(std::min(std::min(440, pWindow->width() * 2 / 3), textWidth + chrome));
+    s_pLabel->setFixedWidth(std::min(std::min(440, pWindow->contentsRect().width() * 2 / 3), textWidth + chrome));
     s_pLabel->adjustSize();
     QPoint pos = anchor;
     if (centered) {
         pos.setX(pos.x() - s_pLabel->width() / 2);
     }
-    pos.setX(std::clamp(pos.x(), 0, std::max(0, pWindow->width() - s_pLabel->width())));
+    pos.setX(std::clamp(pos.x(), 0, std::max(0, pWindow->contentsRect().right() + 1 - s_pLabel->width())));
     pos.setY(std::clamp(pos.y(), 0, std::max(0, pWindow->height() - s_pLabel->height())));
     s_pLabel->move(pos);
     s_pLabel->show();

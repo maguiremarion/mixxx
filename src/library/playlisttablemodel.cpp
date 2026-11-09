@@ -398,15 +398,16 @@ bool PlaylistTableModel::isHistory() const {
 QList<QPair<int, int>> PlaylistTableModel::defaultColumnLayout() const {
     if (isHistory()) {
         // The History page: # (counts up to a few hundred), cover, title, artist, key, BPM, and
-        // when it was last played (this one stretches to the edge)
+        // when it was last played (this one stretches to the edge). 733 px in all, for the 735 px
+        // table of the Pi's screen; the artist gave up the width of the screen's dead strip.
         return {
                 {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 38},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 230},
-                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 170},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 150},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
-                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_LAST_PLAYED_AT), 160},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_LAST_PLAYED_AT), 152},
         };
     }
     if (m_iPlaylistId != m_pTrackCollectionManager->internalCollection()
@@ -414,13 +415,14 @@ QList<QPair<int, int>> PlaylistTableModel::defaultColumnLayout() const {
                                  .getPlaylistIdFromName(AUTODJ_TABLE)) {
         return {};
     }
-    // 762 px in all: the table of the Auto DJ page on a 1024 px screen. The sizes follow the
+    // 731 px in all: the table of the Auto DJ page on the Pi's screen (735 px: 31 px of the 1024 are
+    // behind the frame). The artist gave those 31 px up, the title keeps its width. The sizes follow the
     // Rekordbox table (narrow #, square cover art, BPM, Key, Duration); the last column stretches.
     return {
             {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 280},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 207},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 176},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
@@ -438,15 +440,17 @@ int PlaylistTableModel::defaultFlexibleColumn() const {
 
 int PlaylistTableModel::defaultColumnLayoutVersion() const {
     if (isHistory()) {
-        return 1;
+        // 2: artist and last-played narrower for the 735 px table
+        return 2;
     }
     // 1: # / cover / title / artist / BPM / key
     // 2: the cover column as wide as Rekordbox's (the art is square)
     // 3: # as narrow as Rekordbox's, and Duration after Key
+    // 4: artist 207 -> 176 for the 735 px table
     return m_iPlaylistId == m_pTrackCollectionManager->internalCollection()
                                     ->getPlaylistDAO()
                                     .getPlaylistIdFromName(AUTODJ_TABLE)
-            ? 3
+            ? 4
             : 0;
 }
 

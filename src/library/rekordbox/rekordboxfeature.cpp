@@ -1673,10 +1673,13 @@ CoverInfo RekordboxPlaylistModel::getCoverInfo(const QModelIndex& index) const {
 
 QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
     // The playlist position (#, sorted ascending by default for a playlist), cover art, then the
-    // things you pick a track by, then the overview waveform. The table is 766 px wide on a
-    // 1024 px screen (1024 - sidebar 230 - scrollbar 28); these add up to 764, so the columns fill
-    // it with nothing left over on the right and it never scrolls sideways. The header widens a
-    // column whose title doesn't fit and takes the pixels from the widest one (the title).
+    // things you pick a track by, then the overview waveform. The table is 735 px wide on the
+    // Pi's screen (1024 - the 31 px dead strip behind the frame - sidebar 230 - scrollbar 28); these
+    // add up to 733, so the columns fill it with nothing left over on the right and it never scrolls
+    // sideways. The overview waveform is what gave up the 31 px of the strip (it is a picture and
+    // reads fine narrower); the title, artist and the fixed shapes (#, square cover, BPM, key) keep
+    // their size. The header widens a column whose title doesn't fit and takes the pixels from the
+    // widest one (the title).
     // Everything else is hidden (turn it back on from the header's right-click menu). Bump
     // defaultColumnLayoutVersion() when changing this so it replaces saved layouts.
     return {
@@ -1687,7 +1690,7 @@ QList<QPair<int, int>> RekordboxPlaylistModel::defaultColumnLayout() const {
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 156},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 125},
     };
 }
 
@@ -1704,7 +1707,8 @@ int RekordboxPlaylistModel::defaultColumnLayoutVersion() const {
     // 6: only Duration is measured against its title; all other widths are fixed
     // 7: Key 8 px wider (three-character keys like 10A), Title 8 px narrower; also clears an
     //    Overview width of 1054 px that was saved while the window was briefly oversized
-    return 7;
+    // 8: Overview 156 -> 125: the table is 735 px wide now (31 px of the screen are behind its frame)
+    return 8;
 }
 
 bool RekordboxPlaylistModel::isColumnHiddenByDefault(int column) {

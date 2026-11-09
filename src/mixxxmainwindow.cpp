@@ -59,6 +59,7 @@
 #include "mixer/playermanager.h"
 #include "recording/recordingmanager.h"
 #include "skin/legacy/launchimage.h"
+#include "util/screeninset.h"
 #include "skin/skinloader.h"
 #include "soundio/soundmanager.h"
 #include "sources/soundsourceproxy.h"
@@ -192,6 +193,10 @@ MixxxMainWindow::MixxxMainWindow(std::shared_ptr<mixxx::CoreServices> pCoreServi
     m_pMenuBar->hide();
 
     initializeWindow();
+
+    // The right-hand strip of the Pi's screen is hidden behind its frame: lay everything out without it
+    // (nothing happens unless MIXXX_SCREEN_INSET_RIGHT is set, see util/screeninset.h)
+    mixxx::kiosk::installScreenBezel(this);
 
     // Show launch image immediately so the user knows Mixxx is starting
     m_pSkinLoader = std::make_unique<mixxx::skin::SkinLoader>(m_pCoreServices->getSettings());
@@ -803,6 +808,15 @@ void MixxxMainWindow::initialize() {
     setCentralWidget(m_pCentralWidget);
     if (m_pLaunchOverlay) {
         m_pLaunchOverlay->raise();
+    }
+    if (mixxx::kiosk::screenInsetRight() > 0) {
+        // Says whether the skin fits next to the dead strip (its minimum width must not be more than what is left)
+        QTimer::singleShot(4000, this, [this]() {
+            if (QWidget* pCentral = centralWidget()) {
+                qWarning() << "Screen inset" << mixxx::kiosk::screenInsetRight() << "px: window" << size()
+                           << "skin" << pCentral->geometry() << "its minimum" << pCentral->minimumSizeHint();
+            }
+        });
     }
 
 #ifndef __APPLE__

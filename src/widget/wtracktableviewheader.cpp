@@ -396,6 +396,14 @@ void WTrackTableViewHeader::loadDefaultHeaderState() {
 
 void WTrackTableViewHeader::showEvent(QShowEvent* pEvent) {
     QHeaderView::showEvent(pEvent);
+    // A table that scrolls sideways is a layout that needs its widths looked at: say so in the log
+    // (checked once the columns have settled)
+    QTimer::singleShot(2500, this, [this]() {
+        if (isVisible() && length() > width() + 1) {
+            qWarning() << "Table columns are wider than the table:" << length() << "px of columns in"
+                       << width() << "px";
+        }
+    });
     if (m_fitPending) {
         // After this event the style (skin padding, font) is in place: measure then.
         QTimer::singleShot(0, this, [this]() {

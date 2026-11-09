@@ -65,7 +65,8 @@ bool WOnScreenKeyboard::eventFilter(QObject* pObj, QEvent* pEvent) {
 void WOnScreenKeyboard::reposition() {
     QWidget* pWindow = parentWidget();
     const int height = kRowCount * kKeyHeight + 2 * (kRowCount + 1) + 2;
-    setGeometry(0, pWindow->height() - height, pWindow->width(), height);
+    const QRect area = pWindow->contentsRect(); // not under the screen's dead strip
+    setGeometry(area.left(), pWindow->height() - height, area.width(), height);
 }
 
 void WOnScreenKeyboard::sendKey(int key, const QString& text) {

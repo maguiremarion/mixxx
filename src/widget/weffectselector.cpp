@@ -1,4 +1,5 @@
 #include "widget/weffectselector.h"
+#include "util/screeninset.h"
 
 #include <QAbstractItemView>
 #include <QScreen>
@@ -173,7 +174,8 @@ void WEffectSelector::showPopup() {
         // screen (this selector sits at the right edge, so the list grows leftwards).
         if (QWidget* pPopup = view()->window(); pPopup && pPopup != window()) {
             const QScreen* pScreen = screen();
-            const QRect avail = pScreen ? pScreen->availableGeometry() : QRect(0, 0, 1024, 600);
+            const QRect avail = mixxx::kiosk::screenMinusInset(
+                    pScreen ? pScreen->availableGeometry() : QRect(0, 0, 1024, 600));
             QRect rect = pPopup->geometry();
             rect.setWidth(std::min(std::max(rect.width(), widest + view()->verticalScrollBar()->sizeHint().width()),
                     avail.width() - 16));

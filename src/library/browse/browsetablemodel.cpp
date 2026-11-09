@@ -396,29 +396,40 @@ bool BrowseTableModel::isRecordingList() const {
 }
 
 QList<QPair<int, int>> BrowseTableModel::defaultColumnLayout() const {
+    // The browse table is 735 px wide on the Pi's screen (1024 - the 31 px dead strip behind the
+    // frame - sidebar 230 - scrollbar 28); these add up to 733 so they fill it and it never scrolls
+    // sideways. Everything else is hidden (the header's right-click menu brings it back).
     if (!isRecordingList()) {
-        return {};
+        // A folder on a drive: what you pick a track by (the last column, Duration, stretches)
+        return {
+                {COLUMN_FILENAME, 232},
+                {COLUMN_TITLE, 160},
+                {COLUMN_ARTIST, 136},
+                {COLUMN_BPM, 58},
+                {COLUMN_KEY, 59},
+                {COLUMN_DURATION, 88},
+        };
     }
-    // File name (the long one), duration, when it was recorded, and the file type. The browse table
-    // is 766 px wide on a 1024 px screen (1024 - sidebar 230 - scrollbar 28); these add up to 764
-    // so they fill it and it never scrolls sideways. Everything else is hidden (the header's
-    // right-click menu brings it back).
+    // File name (the long one), duration, when it was recorded, and the file type (it gave up the
+    // width of the dead strip: it only holds "WAV" or "FLAC")
     return {
             {COLUMN_FILENAME, 360},
             {COLUMN_DURATION, 90},
             {COLUMN_FILE_MODIFIED_TIME, 210},
-            {COLUMN_TYPE, 104},
+            {COLUMN_TYPE, 73},
     };
 }
 
 int BrowseTableModel::defaultColumnLayoutVersion() const {
     // 2: the layout is saved when it is applied (version 1 could be recorded with an older saved layout)
-    return isRecordingList() ? 2 : 0;
+    // 3: recordings: Type 104 -> 73 for the 735 px table; the file list of a drive gets a layout too
+    //    (it used to start 13 columns of 100 px each and scroll sideways)
+    return isRecordingList() ? 3 : 1;
 }
 
 int BrowseTableModel::defaultFlexibleColumn() const {
     // Duration: its title is longer than its values
-    return isRecordingList() ? COLUMN_DURATION : -1;
+    return COLUMN_DURATION;
 }
 
 QString BrowseTableModel::modelKey(bool noSearch) const {
