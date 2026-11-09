@@ -312,6 +312,10 @@ void WTrackTableViewHeader::restoreHeaderState() {
             pTrackModel->getModelSetting("header_layout_version").toInt() != layoutVersion;
     if (layoutOutdated) {
         loadDefaultHeaderState();
+        // A new default layout brings the model's default sort with it (an old saved sort would keep the order of before)
+        if (pTrackModel->defaultSortColumn() >= 0 && pTrackModel->defaultSortColumn() < count()) {
+            setSortIndicator(pTrackModel->defaultSortColumn(), pTrackModel->defaultSortOrder());
+        }
         pTrackModel->setModelSetting("header_layout_version", QString::number(layoutVersion));
         // Save it now: the version is recorded as done, and the layout used to be saved only when
         // the program closed. If it was stopped before that (a restart from a script, a power
