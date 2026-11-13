@@ -254,6 +254,17 @@ class TrackModel {
         return settings.setValue(key, value);
     }
 
+    /// The columns the list is sorted by (column, direction), the main one first: the header marks them
+    /// with "1", "2", "3". Only the models that keep more than one sort column say anything.
+    virtual QList<QPair<int, Qt::SortOrder>> sortLevels() const {
+        return {};
+    }
+    /// Adds a column as one more sort level after the ones in use (a long press on its header): false when it cannot be one.
+    virtual bool addSortLevel(int column) {
+        Q_UNUSED(column);
+        return false;
+    }
+
     virtual int defaultSortColumn() const {
         return m_iDefaultSortColumn;
     }

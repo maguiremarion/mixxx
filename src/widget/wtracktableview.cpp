@@ -369,6 +369,10 @@ void WTrackTableView::loadTrackModel(QAbstractItemModel* pNewModel, bool restore
                 &WTrackTableViewHeader::shuffle,
                 this,
                 &WTrackTableView::slotRandomSorting);
+        connect(pHeader,
+                &WTrackTableViewHeader::addSortLevel,
+                this,
+                &WTrackTableView::slotAddSortLevel);
 
         Qt::SortOrder sortOrder;
         TrackModel::SortColumnId sortColumn =
@@ -928,6 +932,10 @@ void WTrackTableView::showRecordingPopup() {
     auto* pLayout = new QVBoxLayout(pPopup);
     pLayout->setContentsMargins(0, 0, 0, 0);
     pLayout->setSpacing(0);
+    // A title like the one over the two decks ("LOAD TRACK")
+    auto* pTitle = new QLabel(tr("EXPORT RECORDING"), pPopup);
+    pTitle->setObjectName(QStringLiteral("LoadPopupTitle"));
+    pLayout->addWidget(pTitle);
 
     auto addButton = [&](const QString& text) {
         auto* pButton = new QPushButton(text, pPopup);
@@ -2546,6 +2554,16 @@ void WTrackTableView::slotSortingChanged(int headerSection, Qt::SortOrder order)
     if (sortingChanged) {
         applySortingIfVisible();
     }
+}
+
+void WTrackTableView::slotAddSortLevel(int section) {
+    TrackModel* pTrackModel = getTrackModel();
+    if (!pTrackModel) {
+        return;
+    }
+    // The model re-sorts itself; the header marks the levels.
+    pTrackModel->addSortLevel(section);
+    horizontalHeader()->viewport()->update();
 }
 
 void WTrackTableView::slotRandomSorting() {

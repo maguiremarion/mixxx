@@ -471,25 +471,63 @@ void BaseSqlTableModel::setSort(int column, Qt::SortOrder order) {
         }
     }
     if (m_sortColumns.size() > 0 && m_sortColumns.at(0).m_column == column) {
-        // Only the order has changed
+        // Only the order of the main sort has changed: the other levels stay
         m_sortColumns.replace(0, SortColumn(column, order));
     } else {
-        // Remove column if already in history
-        // As reverse loop to not skip an entry when removing the previous
-        for (int i = m_sortColumns.size() - 1; i >= 0; --i) {
-            if (m_sortColumns.at(i).m_column == column) {
-                m_sortColumns.removeAt(i);
-                break;
-            }
-        }
+        // A different main column: a plain tap on a header starts a new sort. The levels that were added
+        // by a long press on other headers (addSortLevel) belong to the old main column and are dropped.
+        m_sortColumns.clear();
+        m_sortColumns.append(SortColumn(column, order));
+    }
+    applySortColumns();
+}
 
-        // set new sort as head and shift out old sort
-        m_sortColumns.prepend(SortColumn(column, order));
+QList<QPair<int, Qt::SortOrder>> BaseSqlTableModel::sortLevels() const {
+    QList<QPair<int, Qt::SortOrder>> levels;
+    for (const SortColumn& sc : m_sortColumns) {
+        levels.append({sc.m_column, sc.m_order});
+    }
+    return levels;
+}
 
-        if (m_sortColumns.size() > kMaxSortColumns) {
-            m_sortColumns.removeLast();
+bool BaseSqlTableModel::addSortLevel(int column) {
+    // Only the columns of the track source can be a second or third level, and only below a main sort
+    // that is one as well (the table columns - position, preview, date added - sort on their own).
+    const int trackSourceColumnCount = m_trackSource ? m_trackSource->columnCount() : 0;
+    if (m_sortColumns.isEmpty() || column < m_tableColumns.size() ||
+            column >= trackSourceColumnCount + m_tableColumns.size() - 1 ||
+            m_sortColumns.first().m_column < m_tableColumns.size()) {
+        return false;
+    }
+    if (m_sortColumns.first().m_column == column) {
+        return false;
+    }
+    bool found = false;
+    for (int i = 1; i < m_sortColumns.size(); ++i) {
+        if (m_sortColumns.at(i).m_column == column) {
+            // Already a level: another long press turns its direction around
+            const Qt::SortOrder flipped = m_sortColumns.at(i).m_order == Qt::AscendingOrder
+                    ? Qt::DescendingOrder
+                    : Qt::AscendingOrder;
+            m_sortColumns.replace(i, SortColumn(column, flipped));
+            found = true;
+            break;
         }
     }
+    if (!found) {
+        if (m_sortColumns.size() >= kMaxSortColumns) {
+            m_sortColumns.removeLast();
+        }
+        m_sortColumns.append(SortColumn(column, Qt::AscendingOrder));
+    }
+    applySortColumns();
+    select();
+    return true;
+}
+
+void BaseSqlTableModel::applySortColumns() {
+    const int column = m_sortColumns.first().m_column;
+    const Qt::SortOrder order = m_sortColumns.first().m_order;
 
     // Write new sortColumns order to user settings
     QString val;

@@ -4,6 +4,8 @@
 #include <QHeaderView>
 #include <QMap>
 #include <QMenu>
+#include <QPoint>
+#include <QTimer>
 
 #include "proto/headers.pb.h"
 
@@ -83,6 +85,7 @@ class WTrackTableViewHeader : public QHeaderView {
     // This essentially restores the qss `hover` style.
     void mousePressEvent(QMouseEvent* pEvent) override;
     void mouseMoveEvent(QMouseEvent* pEvent) override;
+    void mouseReleaseEvent(QMouseEvent* pEvent) override;
     void leaveEvent(QEvent* pEvent) override;
 
     // Required to set the preferred height with custom padding
@@ -105,6 +108,8 @@ class WTrackTableViewHeader : public QHeaderView {
 
   signals:
     void shuffle();
+    /// A header was held down (a long press): add its column as one more sort level.
+    void addSortLevel(int section);
 
   private slots:
     void showOrHideColumn(int);
@@ -128,4 +133,10 @@ class WTrackTableViewHeader : public QHeaderView {
     QMap<int, int> m_hiddenColumnSizes;
     int m_hoveredSection;
     int m_previousHoveredSection;
+
+    // Long press on a header = add the column as a further sort level.
+    QTimer m_longPressTimer;
+    int m_pressedSection = -1;
+    QPoint m_pressPos;
+    bool m_longPressFired = false;
 };

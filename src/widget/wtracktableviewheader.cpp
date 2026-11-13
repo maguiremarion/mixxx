@@ -168,6 +168,21 @@ WTrackTableViewHeader::WTrackTableViewHeader(Qt::Orientation orientation,
           m_preferredHeight(-1),
           m_hoveredSection(-1),
           m_previousHoveredSection(-1) {
+    m_longPressTimer.setSingleShot(true);
+    m_longPressTimer.setInterval(450);
+    connect(&m_longPressTimer, &QTimer::timeout, this, [this]() {
+        if (m_pressedSection < 0 || !isSortIndicatorShown() ||
+                m_pressedSection == sortIndicatorSection()) {
+            return;
+        }
+        m_longPressFired = true;
+        emit addSortLevel(m_pressedSection);
+        viewport()->update();
+    });
+    // The level numbers on the other headers change with the main sort.
+    connect(this, &QHeaderView::sortIndicatorChanged, this, [this]() {
+        viewport()->update();
+    });
 }
 
 void WTrackTableViewHeader::contextMenuEvent(QContextMenuEvent* pEvent) {
@@ -312,6 +327,10 @@ void WTrackTableViewHeader::restoreHeaderState() {
             pTrackModel->getModelSetting("header_layout_version").toInt() != layoutVersion;
     if (layoutOutdated) {
         loadDefaultHeaderState();
+        // A new default layout brings the model's default sort with it (an old saved sort would keep the order of before)
+        if (pTrackModel->defaultSortColumn() >= 0 && pTrackModel->defaultSortColumn() < count()) {
+            setSortIndicator(pTrackModel->defaultSortColumn(), pTrackModel->defaultSortOrder());
+        }
         pTrackModel->setModelSetting("header_layout_version", QString::number(layoutVersion));
         // Save it now: the version is recorded as done, and the layout used to be saved only when
         // the program closed. If it was stopped before that (a restart from a script, a power
@@ -579,13 +598,42 @@ void WTrackTableViewHeader::leaveEvent(QEvent* pEvent) {
 }
 
 void WTrackTableViewHeader::mousePressEvent(QMouseEvent* pEvent) {
+    m_longPressFired = false;
+    m_pressPos = pEvent->pos();
+    m_pressedSection = logicalIndexAt(pEvent->pos());
+    if (pEvent->button() == Qt::LeftButton && m_pressedSection >= 0) {
+        m_longPressTimer.start();
+    }
     QHeaderView::mousePressEvent(pEvent);
     if (QLabel* pIndicator = viewport()->findChild<QLabel*>()) {
         pIndicator->hide();
     }
 }
 
+void WTrackTableViewHeader::mouseReleaseEvent(QMouseEvent* pEvent) {
+    m_longPressTimer.stop();
+    if (m_longPressFired) {
+        // The press already added a sort level: the release must not count as a tap (which would sort
+        // by that column on its own).
+        m_longPressFired = false;
+        // Qt moves the sort arrow to the released header on its own (the signal is blocked, the move
+        // is not), so put it back on the main column.
+        const int mainSection = sortIndicatorSection();
+        const Qt::SortOrder mainOrder = sortIndicatorOrder();
+        QSignalBlocker blocker(this);
+        QHeaderView::mouseReleaseEvent(pEvent);
+        setSortIndicator(mainSection, mainOrder);
+        viewport()->update();
+        return;
+    }
+    QHeaderView::mouseReleaseEvent(pEvent);
+}
+
 void WTrackTableViewHeader::mouseMoveEvent(QMouseEvent* pEvent) {
+    // A finger that moves is dragging or resizing a column, not holding it.
+    if (m_longPressTimer.isActive() && (pEvent->pos() - m_pressPos).manhattanLength() > 10) {
+        m_longPressTimer.stop();
+    }
     int hovered = logicalIndexAt(pEvent->pos());
 
     // We need to track the hover state manually, it's not set when initializing
@@ -654,10 +702,32 @@ void WTrackTableViewHeader::paintSection(
 
     // The sort arrow is small, in proportion to the text (it used to be as tall as the whole
     // header), and sits at the right edge.
-    const bool showIndicator = isSortIndicatorShown() && sortIndicatorSection() == logicalIndex;
+    // With several sort levels the main column shows "1" and the others "2" / "3", each with its own arrow.
+    int level = 0;
+    Qt::SortOrder levelOrder = sortIndicatorOrder();
+    int levelCount = 0;
+    if (isSortIndicatorShown()) {
+        if (const auto* pTrackModel = dynamic_cast<const TrackModel*>(model())) {
+            const auto levels = pTrackModel->sortLevels();
+            levelCount = levels.size();
+            for (int i = 0; i < levels.size(); ++i) {
+                if (levels.at(i).first == logicalIndex) {
+                    level = i + 1;
+                    levelOrder = levels.at(i).second;
+                    break;
+                }
+            }
+        }
+    }
+    const bool showIndicator = isSortIndicatorShown() &&
+            (sortIndicatorSection() == logicalIndex || (levelCount > 1 && level > 1));
+    const bool showLevelNumber = showIndicator && levelCount > 1 && level > 0;
+    const QString levelText = showLevelNumber ? QString::number(level) : QString();
+    const int levelGap = 3;
+    const int levelSpace = showLevelNumber ? fontMetrics.horizontalAdvance(levelText) + levelGap : 0;
     const int indicatorSize = std::max(7, fontMetrics.ascent() * 6 / 10);
     const int indicatorGap = 6;
-    const int indicatorSpace = showIndicator ? indicatorSize + indicatorGap : 0;
+    const int indicatorSpace = showIndicator ? indicatorSize + indicatorGap + levelSpace : 0;
 
     // A label that doesn't fit completely is not drawn at all: a cut-off "Cov" or an arrow drawn
     // over the text both look worse than a blank header (the full name is in its tooltip). The
@@ -707,6 +777,18 @@ void WTrackTableViewHeader::paintSection(
                 : contentRect.left() + (contentRect.width() - indicatorSize) / 2;
         opt.rect = QRect(left, indicatorTop, indicatorSize, indicatorSize);
 
+        if (showLevelNumber) {
+            PainterScope numberScope(pPainter);
+            pPainter->setFont(font());
+            pPainter->setPen(m_headerTextColor.isValid() ? m_headerTextColor
+                                                         : opt.palette.color(QPalette::ButtonText));
+            const QRect numberRect(left - levelSpace,
+                    contentRect.top(),
+                    levelSpace - levelGap,
+                    contentRect.height());
+            pPainter->drawText(numberRect, Qt::AlignRight | Qt::AlignVCenter, levelText);
+        }
+
         // The arrow is drawn here, as a plain filled triangle in the title colour. The style's
         // PE_IndicatorArrowUp/Down paints with the palette, which is black on the Pi (Fusion
         // ignores the qss colour), so the arrow was hard to see. (PE_IndicatorHeaderArrow isn't
@@ -719,7 +801,7 @@ void WTrackTableViewHeader::paintSection(
         const QRectF r(opt.rect);
         const qreal margin = r.width() * 0.1;
         QPolygonF triangle;
-        if (sortIndicatorOrder() == Qt::AscendingOrder) {
+        if (levelOrder == Qt::AscendingOrder) {
             triangle << QPointF(r.center().x(), r.top() + margin)
                      << QPointF(r.right() - margin, r.bottom() - margin)
                      << QPointF(r.left() + margin, r.bottom() - margin);

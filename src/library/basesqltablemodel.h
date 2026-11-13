@@ -39,6 +39,8 @@ class BaseSqlTableModel : public BaseTrackTableModel {
     int columnCount(const QModelIndex& parent = QModelIndex()) const final;
 
     void sort(int column, Qt::SortOrder order) final;
+    QList<QPair<int, Qt::SortOrder>> sortLevels() const override;
+    bool addSortLevel(int column) override;
 
     ///////////////////////////////////////////////////////////////////////////
     // Inherited from TrackModel
@@ -170,6 +172,8 @@ class BaseSqlTableModel : public BaseTrackTableModel {
     QSharedPointer<BaseTrackCache> m_trackSource;
     QStringList m_tableColumns;
     QList<SortColumn> m_sortColumns;
+    // Writes the sort columns to the settings and builds the ORDER BY clauses from them (the first one is the main sort).
+    void applySortColumns();
     bool m_bInitialized;
     QHash<TrackId, int> m_trackSortOrder;
     TrackId2Rows m_trackIdToRows;

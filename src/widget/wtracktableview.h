@@ -161,6 +161,7 @@ class WTrackTableView : public WLibraryTableView {
 
     void slotSortingChanged(int headerSection, Qt::SortOrder order);
     void slotRandomSorting();
+    void slotAddSortLevel(int section);
     void keyNotationChanged();
 
     // A plain left-click on a row offers a small "Load 1 / Load 2" popup.
