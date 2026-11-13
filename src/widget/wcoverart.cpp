@@ -3,11 +3,13 @@
 #include <QStyleOption>
 #include <QStylePainter>
 
+#include "control/controlobject.h"
 #include "library/coverartcache.h"
 #include "library/coverartutils.h"
 #include "library/dlgcoverartfullsize.h"
 #include "mixer/basetrackplayer.h"
 #include "moc_wcoverart.cpp"
+#include "preferences/dialog/dlgpreferences.h"
 #include "skin/legacy/skincontext.h"
 #include "track/track.h"
 #include "util/dnd.h"
@@ -262,6 +264,12 @@ void WCoverArt::mouseReleaseEvent(QMouseEvent* pEvent) {
     if (pEvent->button() == Qt::LeftButton &&
             m_loadedTrack &&
             m_clickTimer.isActive()) { // init/close fullsize cover
+        if (DlgPreferences::kioskMode() && !m_group.isEmpty()) {
+            // Kiosk: the deck's cover is a hidden play/pause button (no full-size cover).
+            const ConfigKey playKey(m_group, QStringLiteral("play"));
+            ControlObject::set(playKey, ControlObject::toBool(playKey) ? 0.0 : 1.0);
+            return;
+        }
         if (m_pDlgFullSize->isVisible()) {
             m_pDlgFullSize->close();
         } else if (!m_loadedCover.isNull()) {
