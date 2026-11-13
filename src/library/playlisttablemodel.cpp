@@ -129,9 +129,9 @@ void PlaylistTableModel::initSortColumnMapping() {
     }
 }
 
-void PlaylistTableModel::selectPlaylist(int playlistId) {
+void PlaylistTableModel::selectPlaylist(int playlistId, const QDate& day) {
     // qDebug() << "PlaylistTableModel::selectPlaylist" << playlistId;
-    if (m_iPlaylistId == playlistId) {
+    if (m_iPlaylistId == playlistId && m_day == day) {
         qDebug() << "Already focused on playlist " << playlistId;
         return;
     }
@@ -158,8 +158,16 @@ void PlaylistTableModel::selectPlaylist(int playlistId) {
     // playlistsChanged() which would call select() -- which is simply not required
     // because we'll trigger that ourselves later on.
     m_iPlaylistId = playlistId;
+    m_day = day;
 
     QString playlistTableName = "playlist_" + QString::number(m_iPlaylistId);
+    QString dayClause;
+    if (day.isValid()) {
+        playlistTableName += "_" + day.toString(QStringLiteral("yyyyMMdd"));
+        // pl_datetime_added is stored in UTC (CURRENT_TIMESTAMP)
+        dayClause = QStringLiteral(" AND date(PlaylistTracks.pl_datetime_added, 'localtime') = '%1'")
+                            .arg(day.toString(Qt::ISODate));
+    }
     QSqlQuery query(m_database);
     FieldEscaper escaper(m_database);
 
@@ -176,10 +184,11 @@ void PlaylistTableModel::selectPlaylist(int playlistId) {
             "CREATE TEMPORARY VIEW IF NOT EXISTS %1 AS "
             "SELECT %2 FROM PlaylistTracks "
             "INNER JOIN library ON library.id = PlaylistTracks.track_id "
-            "WHERE PlaylistTracks.playlist_id = %3")
+            "WHERE PlaylistTracks.playlist_id = %3%4")
                                   .arg(escaper.escapeString(playlistTableName),
                                           columns.join(","),
-                                          QString::number(playlistId));
+                                          QString::number(playlistId),
+                                          dayClause);
     query.prepare(queryString);
     if (!query.exec()) {
         LOG_FAILED_QUERY(query);

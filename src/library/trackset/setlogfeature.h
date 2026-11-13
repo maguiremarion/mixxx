@@ -34,6 +34,8 @@ class SetlogFeature : public BasePlaylistFeature {
     // Kiosk: one History page of everything played, kept to a limited length
     void useSingleHistory();
     void trimHistory();
+    /// Kiosk: the History's list under it: ALL, then one entry per day that has played tracks
+    void refreshHistoryDays();
     void activate() override;
     void activateChild(const QModelIndex& index) override;
 
@@ -62,6 +64,7 @@ class SetlogFeature : public BasePlaylistFeature {
     QAction* m_pDeleteAllChildPlaylists;
 
     int m_currentPlaylistId;
+    QString m_historyDaysSignature;
     int m_yearNodeId;
     Library* m_pLibrary;
     UserSettingsPointer m_pConfig;

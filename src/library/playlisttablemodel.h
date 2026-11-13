@@ -1,5 +1,7 @@
 #pragma once
 
+#include <QDate>
+
 #include "library/trackset/tracksettablemodel.h"
 #include "util/duration.h"
 
@@ -13,7 +15,9 @@ class PlaylistTableModel final : public TrackSetTableModel {
             bool keepHiddenTracks = false);
     ~PlaylistTableModel() final = default;
 
-    void selectPlaylist(int playlistId = -1 /* kInvalidPlaylistId */);
+    /// With a valid `day` only the tracks that were added on that (local) day are shown: the History
+    /// groups its single list by the day it was played.
+    void selectPlaylist(int playlistId = -1 /* kInvalidPlaylistId */, const QDate& day = QDate());
     int getPlaylist() const {
         return m_iPlaylistId;
     }
@@ -60,6 +64,7 @@ class PlaylistTableModel final : public TrackSetTableModel {
     void initSortColumnMapping() override;
 
     int m_iPlaylistId;
+    QDate m_day;
     bool m_keepHiddenTracks;
     QHash<int, QString> m_searchTexts;
 };

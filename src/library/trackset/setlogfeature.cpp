@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QMenu>
 #include <QSqlTableModel>
+#include <QLocale>
 
 #include "library/library.h"
 #include "library/library_prefs.h"
@@ -400,6 +401,60 @@ void SetlogFeature::useSingleHistory() {
     trimHistory();
 }
 
+void SetlogFeature::refreshHistoryDays() {
+    if (!DlgPreferences::kioskMode() || m_currentPlaylistId == kInvalidPlaylistId) {
+        return;
+    }
+    QSqlDatabase database =
+            m_pLibrary->trackCollectionManager()->internalCollection()->database();
+    QSqlQuery query(database);
+    query.prepare(QStringLiteral(
+            "SELECT date(pl_datetime_added, 'localtime') AS day FROM PlaylistTracks "
+            "WHERE playlist_id = :id GROUP BY day ORDER BY day DESC"));
+    query.bindValue(QStringLiteral(":id"), m_currentPlaylistId);
+    if (!query.exec()) {
+        LOG_FAILED_QUERY(query);
+        return;
+    }
+    QList<QDate> days;
+    while (query.next()) {
+        const QDate day = QDate::fromString(query.value(0).toString(), Qt::ISODate);
+        if (day.isValid()) {
+            days.append(day);
+        }
+    }
+
+    // Only rebuild when the days changed (the first track of a new day, a day trimmed away): a rebuild
+    // folds the sidebar entry.
+    QString signature = QString::number(m_currentPlaylistId);
+    for (const QDate& day : std::as_const(days)) {
+        signature += QLatin1Char(',') + day.toString(Qt::ISODate);
+    }
+    if (signature == m_historyDaysSignature) {
+        return;
+    }
+    m_historyDaysSignature = signature;
+
+    const QDate today = QDate::currentDate();
+    clearChildModel();
+    std::vector<std::unique_ptr<TreeItem>> itemList;
+    itemList.push_back(std::make_unique<TreeItem>(tr("ALL"), m_currentPlaylistId));
+    for (const QDate& day : std::as_const(days)) {
+        QString label;
+        if (day == today) {
+            label = tr("Today");
+        } else if (day == today.addDays(-1)) {
+            label = tr("Yesterday");
+        } else {
+            label = QLocale().toString(day,
+                    day.year() == today.year() ? QStringLiteral("ddd, MMM d")
+                                               : QStringLiteral("ddd, MMM d, yyyy"));
+        }
+        itemList.push_back(std::make_unique<TreeItem>(label, QVariant::fromValue(day)));
+    }
+    m_pSidebarModel->insertTreeItemRows(std::move(itemList), 0);
+}
+
 void SetlogFeature::trimHistory() {
     if (m_currentPlaylistId == kInvalidPlaylistId) {
         return;
@@ -419,6 +474,7 @@ void SetlogFeature::slotGetNewPlaylist() {
     //qDebug() << "slotGetNewPlaylist() successfully triggered !";
     if (DlgPreferences::kioskMode()) {
         useSingleHistory();
+        refreshHistoryDays();
         return;
     }
 
@@ -723,6 +779,7 @@ void SetlogFeature::slotPlayingTrackChanged(TrackPointer currentPlayingTrack) {
                 currentPlayingTrackId, m_currentPlaylistId);
     }
     trimHistory();
+    refreshHistoryDays();
 }
 
 void SetlogFeature::slotPlaylistTableChanged(int playlistId) {
@@ -819,6 +876,7 @@ void SetlogFeature::activate() {
         if (m_currentPlaylistId == kInvalidPlaylistId) {
             return;
         }
+        refreshHistoryDays();
         emit saveModelState();
         m_pPlaylistTableModel->selectPlaylist(m_currentPlaylistId);
         emit showTrackModel(m_pPlaylistTableModel);
@@ -833,6 +891,21 @@ void SetlogFeature::activate() {
 
 void SetlogFeature::activateChild(const QModelIndex& index) {
     // qDebug() << "SetlogFeature::activateChild()" << index;
+    if (DlgPreferences::kioskMode()) {
+        // Under the History: ALL (the whole list) or one day of it
+        const TreeItem* pItem = static_cast<TreeItem*>(index.internalPointer());
+        if (pItem && pItem->getData().metaType() == QMetaType::fromType<QDate>() &&
+                m_currentPlaylistId != kInvalidPlaylistId) {
+            m_lastClickedIndex = index;
+            m_lastRightClickedIndex = QModelIndex();
+            emit saveModelState();
+            m_pPlaylistTableModel->selectPlaylist(
+                    m_currentPlaylistId, pItem->getData().toDate());
+            emit showTrackModel(m_pPlaylistTableModel);
+            emit enableCoverArtDisplay(true);
+            return;
+        }
+    }
     int playlistId = playlistIdFromIndex(index);
     if (playlistId == kInvalidPlaylistId) {
         // may happen during initialization
