@@ -15,7 +15,9 @@
 #include "waveform/waveform.h"
 
 const double WaveformWidgetRenderer::s_waveformMinZoom = 1.0;
-const double WaveformWidgetRenderer::s_waveformMaxZoom = 10.0;
+// Stock Mixxx stops at 10. The demo wants to see further ahead when mixing (the zoom buttons, the
+// mouse wheel and the zoom default in Preferences all follow this limit).
+const double WaveformWidgetRenderer::s_waveformMaxZoom = 20.0;
 const double WaveformWidgetRenderer::s_waveformDefaultZoom = 3.0;
 const double WaveformWidgetRenderer::s_defaultPlayMarkerPosition = 0.5;
 
