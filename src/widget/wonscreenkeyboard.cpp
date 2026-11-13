@@ -6,8 +6,10 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QStyle>
+#include <QTimer>
 
 #include "moc_wonscreenkeyboard.cpp"
+#include "widget/wsearchlineedit.h"
 
 namespace {
 constexpr int kKeyHeight = 50;
@@ -33,6 +35,29 @@ WOnScreenKeyboard::WOnScreenKeyboard(QWidget* pParent)
     buildKeys();
     parent()->installEventFilter(this);
     hide();
+
+    // The keyboard belongs to the search box: whenever no visible search box has the focus (the page
+    // with it was left, the window lost the focus, ...) it closes itself. The focus-out / hide events
+    // of the box did not catch every way of leaving Browse.
+    auto* pWatch = new QTimer(this);
+    pWatch->setInterval(150);
+    connect(pWatch, &QTimer::timeout, this, [this]() {
+        if (!isVisible()) {
+            return;
+        }
+        bool inSearchBox = false;
+        QWidget* pFocus = QApplication::focusWidget();
+        for (QWidget* pWidget = pFocus; pWidget; pWidget = pWidget->parentWidget()) {
+            if (qobject_cast<WSearchLineEdit*>(pWidget)) {
+                inSearchBox = pFocus->isVisible() && pWidget->isVisible();
+                break;
+            }
+        }
+        if (!inSearchBox) {
+            hide();
+        }
+    });
+    pWatch->start();
 }
 
 void WOnScreenKeyboard::showIn(QWidget* pWindow) {

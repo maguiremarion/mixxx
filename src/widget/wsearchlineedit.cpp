@@ -514,6 +514,18 @@ void WSearchLineEdit::focusOutEvent(QFocusEvent* event) {
     }
 }
 
+void WSearchLineEdit::hideEvent(QHideEvent* event) {
+    QComboBox::hideEvent(event);
+    // Let go of the focus too: otherwise the box takes it back when the page is shown again, and that
+    // opens the keyboard on its own.
+    if (hasFocus() || (lineEdit() && lineEdit()->hasFocus())) {
+        clearFocus();
+    }
+    // Leaving the page with the search box (Browse -> Decks) while the on-screen keyboard is up: the
+    // box does not always get a focus-out then, and the keyboard would stay over the decks.
+    setOnScreenKeyboardVisible(false, this);
+}
+
 void WSearchLineEdit::setTextBlockSignals(const QString& text) {
     if (kLogger.traceEnabled()) {
         kLogger.trace()
