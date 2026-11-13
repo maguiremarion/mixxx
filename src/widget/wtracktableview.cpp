@@ -617,7 +617,8 @@ void WTrackTableView::showLoadPopup() {
     QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
         const QRect avail = mixxx::kiosk::screenMinusInset(pScreen->availableGeometry());
-        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        // Centred under the tap (same height as before), nudged back on-screen at the edges.
+        pos.setX(qBound(avail.left(), pos.x() - pPopup->width() / 2, avail.right() - pPopup->width()));
         pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
     }
     pPopup->move(pos);
@@ -671,7 +672,8 @@ void WTrackTableView::showAutoDJSessionPopup() {
     QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
         const QRect avail = mixxx::kiosk::screenMinusInset(pScreen->availableGeometry());
-        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        // Centred under the tap (same height as before), nudged back on-screen at the edges.
+        pos.setX(qBound(avail.left(), pos.x() - pPopup->width() / 2, avail.right() - pPopup->width()));
         pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
     }
     pPopup->move(pos);
@@ -1029,7 +1031,8 @@ void WTrackTableView::showRecordingPopup() {
     QPoint pos = lastPointerPos();
     if (const QScreen* pScreen = screen()) {
         const QRect avail = mixxx::kiosk::screenMinusInset(pScreen->availableGeometry());
-        pos.setX(qBound(avail.left(), pos.x(), avail.right() - pPopup->width()));
+        // Centred under the tap (same height as before), nudged back on-screen at the edges.
+        pos.setX(qBound(avail.left(), pos.x() - pPopup->width() / 2, avail.right() - pPopup->width()));
         pos.setY(qBound(avail.top(), pos.y(), avail.bottom() - pPopup->height()));
     }
     pPopup->move(pos);
