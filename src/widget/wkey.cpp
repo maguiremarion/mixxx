@@ -1,13 +1,16 @@
 #include "widget/wkey.h"
 
+#include <QAbstractItemView>
+#include <QApplication>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QStyleOption>
 #include <QStylePainter>
 
-#include "control/controlpushbutton.h"
+#include "control/controlproxy.h"
 #include "library/library_prefs.h"
 #include "moc_wkey.cpp"
+#include "preferences/keydetectionsettings.h"
 #include "preferences/usersettings.h"
 #include "skin/legacy/skincontext.h"
 #include "track/keyutils.h"
@@ -17,21 +20,30 @@
 
 namespace {
 
-const ConfigKey kShowCamelotKey(QStringLiteral("[Skin]"), QStringLiteral("key_show_camelot"));
-
-// Creates the shared "show keys as 1A" toggle the first time a key label is built. It must exist
-// before the labels' proxies are made (a proxy to a missing control stays invalid).
-ConfigKey ensureShowCamelotControl() {
-    // Deliberately never deleted. A static std::unique_ptr here was destroyed during process
-    // exit, long after Mixxx had torn down its control registry, and crashed (segfault on every
-    // quit). The OS reclaims the memory when the process ends.
-    static ControlPushButton* s_pShowCamelot = nullptr;
-    if (!s_pShowCamelot) {
-        // On unless somebody chose otherwise: keys read "8A", not "Am"
-        s_pShowCamelot = new ControlPushButton(kShowCamelotKey, /*persist*/ true, /*default*/ 1.0);
-        s_pShowCamelot->setButtonMode(mixxx::control::ButtonMode::Toggle);
+// Sets the key notation for the whole player: the labels, the Key column of every table (they ask KeyUtils at paint time)
+// and the tables' key sort order (ColumnCache hears the [Library],key_notation control). It is also written to the settings
+// file at once, not only when the player exits, so that a power cut does not lose the choice.
+void applyKeyNotation(KeyUtils::KeyNotation notation, UserSettingsPointer pConfig, ControlProxy* pNotationControl) {
+    QMap<mixxx::track::io::key::ChromaticKey, QString> names;
+    for (int key = mixxx::track::io::key::C_MAJOR; key <= mixxx::track::io::key::B_MINOR; ++key) {
+        const auto chromaticKey = static_cast<mixxx::track::io::key::ChromaticKey>(key);
+        names[chromaticKey] = KeyUtils::keyToString(chromaticKey, notation);
     }
-    return kShowCamelotKey;
+    KeyUtils::setNotation(names);
+    pNotationControl->set(static_cast<double>(notation));
+    if (pConfig) {
+        KeyDetectionSettings(pConfig).setKeyNotation(notation == KeyUtils::KeyNotation::Lancelot
+                        ? QStringLiteral(KEY_NOTATION_LANCELOT)
+                        : QStringLiteral(KEY_NOTATION_TRADITIONAL));
+        pConfig->save();
+    }
+    // The tables read the notation when they paint: have them paint again
+    const auto widgets = QApplication::allWidgets();
+    for (QWidget* pWidget : widgets) {
+        if (auto* pView = qobject_cast<QAbstractItemView*>(pWidget)) {
+            pView->viewport()->update();
+        }
+    }
 }
 
 } // namespace
@@ -39,7 +51,7 @@ ConfigKey ensureShowCamelotControl() {
 WKey::WKey(const QString& group, UserSettingsPointer pConfig, QWidget* pParent)
         : WLabel(pParent),
           m_keyNotation(mixxx::library::prefs::kKeyNotationConfigKey, this),
-          m_showCamelot(ensureShowCamelotControl(), this),
+          m_pConfig(pConfig),
           m_engineKeyDistance(group,
                   "visual_key_distance",
                   this,
@@ -51,15 +63,6 @@ WKey::WKey(const QString& group, UserSettingsPointer pConfig, QWidget* pParent)
           m_colorPaletteSettings(pConfig) {
     setValue();
     m_keyNotation.connectValueChanged(this, &WKey::keyNotationChanged);
-    m_showCamelot.connectValueChanged(this, [this, pConfig](double value) {
-        // Remember the choice for the next start. A persistent control saves itself when it is
-        // destroyed, and this one never is (see ensureShowCamelotControl()), so write it here.
-        // The control reads it back when it is created.
-        if (pConfig) {
-            pConfig->setValue(kShowCamelotKey, value > 0.0);
-        }
-        setValue();
-    });
     m_engineKeyDistance.connectValueChanged(this, &WKey::setCents);
 }
 
@@ -84,9 +87,7 @@ void WKey::setValue() {
         // Render this key with the user-provided notation.
         QString keyStr = "";
         if (m_displayKey) {
-            keyStr = m_showCamelot.get() > 0.0
-                    ? KeyUtils::keyToString(m_key, KeyUtils::KeyNotation::Lancelot)
-                    : KeyUtils::keyToString(m_key);
+            keyStr = KeyUtils::keyToString(m_key);
         }
         if (m_displayCents) {
             int cents_to_display = static_cast<int>(m_diff_cents * 100);
@@ -106,12 +107,13 @@ void WKey::setValue() {
 }
 
 void WKey::mousePressEvent(QMouseEvent* pEvent) {
-    // A tap flips every key label between e.g. "Gm" and "1A".
+    // A tap flips the notation everywhere (labels and tables) between Camelot ("8A") and the standard names ("Am").
     if (pEvent->button() == Qt::LeftButton) {
-        m_showCamelot.set(m_showCamelot.get() > 0.0 ? 0.0 : 1.0);
-        // A ControlProxy doesn't signal the object that made the change, so this label has to
-        // refresh itself (any other key label hears about it through the signal).
-        setValue();
+        const bool camelot = KeyUtils::keyNotationFromNumericValue(m_keyNotation.get()) == KeyUtils::KeyNotation::Lancelot;
+        applyKeyNotation(camelot ? KeyUtils::KeyNotation::Traditional : KeyUtils::KeyNotation::Lancelot,
+                m_pConfig,
+                &m_keyNotation);
+        setValue(); // a ControlProxy does not signal the object that changed it
         pEvent->accept();
         return;
     }

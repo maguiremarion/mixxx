@@ -362,9 +362,9 @@ QList<QPair<int, int>> SeratoPlaylistModel::defaultColumnLayout() const {
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 192},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 141},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 67},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 125},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_WAVESUMMARYHEX), 117},
     };
 }
 
@@ -374,5 +374,6 @@ int SeratoPlaylistModel::defaultFlexibleColumn() const {
 
 int SeratoPlaylistModel::defaultColumnLayoutVersion() const {
     // 2: Overview 156 -> 125 (the table is 735 px wide now)
-    return 2;
+    // 3: Key 59 -> 67, Overview 125 -> 117 (see Rekordbox)
+    return 3;
 }

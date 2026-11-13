@@ -87,7 +87,12 @@ BrowseTableModel::BrowseTableModel(QObject* parent,
             COLUMN_ALBUMARTIST,
             COLUMN_GROUPING};
 
-    setDefaultSort(COLUMN_FILENAME, Qt::AscendingOrder);
+    // Recordings: the newest first (Recording Created, descending); a folder on a drive: by file name
+    if (isRecordingList()) {
+        setDefaultSort(COLUMN_FILE_MODIFIED_TIME, Qt::DescendingOrder);
+    } else {
+        setDefaultSort(COLUMN_FILENAME, Qt::AscendingOrder);
+    }
 
     for (int i = 0; i < static_cast<int>(TrackModel::SortColumnId::IdMax); ++i) {
         m_columnIndexBySortColumnId[i] = -1;
@@ -154,6 +159,10 @@ BrowseTableModel::BrowseTableModel(QObject* parent,
         }
     }
 
+    if (isRecordingList()) {
+        // What that time is for a recording: when it was made (the file is written once, as it is recorded)
+        headerLabels[COLUMN_FILE_MODIFIED_TIME] = tr("Recording Created");
+    }
     setHorizontalHeaderLabels(headerLabels);
     // register the QList<T> as a metatype since we use QueuedConnection below
     qRegisterMetaType<QList<QList<QStandardItem*>>>(
@@ -402,11 +411,11 @@ QList<QPair<int, int>> BrowseTableModel::defaultColumnLayout() const {
     if (!isRecordingList()) {
         // A folder on a drive: what you pick a track by (the last column, Duration, stretches)
         return {
-                {COLUMN_FILENAME, 232},
+                {COLUMN_FILENAME, 224},
                 {COLUMN_TITLE, 160},
                 {COLUMN_ARTIST, 136},
                 {COLUMN_BPM, 58},
-                {COLUMN_KEY, 59},
+                {COLUMN_KEY, 67},
                 {COLUMN_DURATION, 88},
         };
     }
@@ -422,9 +431,11 @@ QList<QPair<int, int>> BrowseTableModel::defaultColumnLayout() const {
 
 int BrowseTableModel::defaultColumnLayoutVersion() const {
     // 2: the layout is saved when it is applied (version 1 could be recorded with an older saved layout)
+    // 4: recordings: newest first by default (Recording Created, descending): replaces a saved sort
     // 3: recordings: Type 104 -> 73 for the 735 px table; the file list of a drive gets a layout too
     //    (it used to start 13 columns of 100 px each and scroll sideways)
-    return isRecordingList() ? 3 : 1;
+    // (the Computer file list: 2: Key 59 -> 67, file name 232 -> 224)
+    return isRecordingList() ? 4 : 2;
 }
 
 int BrowseTableModel::defaultFlexibleColumn() const {

@@ -404,8 +404,8 @@ QList<QPair<int, int>> PlaylistTableModel::defaultColumnLayout() const {
                 {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 38},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 230},
-                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 150},
-                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 142},
+                {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 67},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
                 {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_LAST_PLAYED_AT), 152},
         };
@@ -422,9 +422,9 @@ QList<QPair<int, int>> PlaylistTableModel::defaultColumnLayout() const {
             {fieldIndex(ColumnCache::COLUMN_PLAYLISTTRACKSTABLE_POSITION), 24},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_COVERART), 46},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_TITLE), 280},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 176},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_ARTIST), 168},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_BPM), 58},
-            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 59},
+            {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_KEY), 67},
             {fieldIndex(ColumnCache::COLUMN_LIBRARYTABLE_DURATION), 88},
     };
 }
@@ -441,16 +441,18 @@ int PlaylistTableModel::defaultFlexibleColumn() const {
 int PlaylistTableModel::defaultColumnLayoutVersion() const {
     if (isHistory()) {
         // 2: artist and last-played narrower for the 735 px table
-        return 2;
+        // 3: Key 59 -> 67, artist 150 -> 142
+        return 3;
     }
     // 1: # / cover / title / artist / BPM / key
     // 2: the cover column as wide as Rekordbox's (the art is square)
     // 3: # as narrow as Rekordbox's, and Duration after Key
     // 4: artist 207 -> 176 for the 735 px table
+    // 5: Key 59 -> 67, artist 176 -> 168
     return m_iPlaylistId == m_pTrackCollectionManager->internalCollection()
                                     ->getPlaylistDAO()
                                     .getPlaylistIdFromName(AUTODJ_TABLE)
-            ? 4
+            ? 5
             : 0;
 }
 

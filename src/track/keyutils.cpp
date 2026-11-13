@@ -816,7 +816,16 @@ QVariant KeyUtils::keyFromKeyTextAndIdFields(
     // currently stored in the DB) then lookup the key and render it
     // using the user's selected notation.
     if (keyIdField.isNull()) {
-        // Otherwise, just use the KEY column value as is
+        // No key number (the Rekordbox and Serato tables only have the text): read the key from the text, whatever
+        // notation it is in ("Am", "8A", "B♭m"), and show it in the notation that is chosen now. Text that is not a
+        // key is kept as it is.
+        const QString text = keyTextField.toString();
+        if (!text.isEmpty()) {
+            const auto guessed = KeyUtils::guessKeyFromText(text);
+            if (guessed != mixxx::track::io::key::INVALID) {
+                return QVariant{KeyUtils::keyToString(guessed)};
+            }
+        }
         return keyTextField;
     }
     // Convert or clear invalid values
