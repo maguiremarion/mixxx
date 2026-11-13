@@ -182,6 +182,21 @@ DlgPrefSound::DlgPrefSound(QWidget* pParent,
             pCombo->setMinimumContentsLength(14);
         }
         verticalLayout_2->insertWidget(0, pCard);
+
+        // The Output and Input sections sit in the tab widget, whose pane is a frame; the Settings section used to be
+        // loose widgets under a separator line. Same frame for it, and no line.
+        line_2->hide();
+        const int gridIndex = verticalLayout_2->indexOf(gridLayout);
+        verticalLayout_2->removeItem(gridLayout);
+        m_pSettingsBox = new QFrame(this);
+        m_pSettingsBox->setObjectName(QStringLiteral("SoundSettingsBox"));
+        m_pSettingsBox->setStyleSheet(QStringLiteral(
+                "QFrame#SoundSettingsBox { border: 1px solid #2e2e34; background-color: #181818; }"
+                "QFrame#SoundSettingsBox QLabel { background-color: transparent; border: none; }"));
+        auto* pBoxLayout = new QVBoxLayout(m_pSettingsBox);
+        pBoxLayout->setContentsMargins(20, 16, 20, 16);
+        pBoxLayout->addLayout(gridLayout);
+        verticalLayout_2->insertWidget(qMax(gridIndex, 0), m_pSettingsBox);
     }
     // Create text color for the wiki links
     createLinkColor();
@@ -781,13 +796,19 @@ void DlgPrefSound::showSection(Section section) {
     if (m_settingsWidgets.isEmpty()) {
         collectWidgets(gridLayout, &m_settingsWidgets);
         collectWidgets(buttonsHLayout, &m_settingsWidgets);
-        m_settingsWidgets.append(line_2);
+        m_settingsWidgets.append(m_pSettingsBox); // its frame (the widgets in it are the ones above)
         m_settingsWidgets.append(Hints);
         ioTabs->tabBar()->hide(); // the sections are the tabs now
     }
     const bool settings = section == Section::Settings;
     if (!settings) {
-        ioTabs->setCurrentWidget(section == Section::Output ? outputTab : inputTab);
+        const bool output = section == Section::Output;
+        ioTabs->setCurrentWidget(output ? outputTab : inputTab);
+        // A tab widget is as tall as its tallest page, so the Output section (fewer options) had the Input section's
+        // height: the page that is not shown is left out of its size (an Ignored height).
+        outputTab->setSizePolicy(QSizePolicy::Preferred, output ? QSizePolicy::Preferred : QSizePolicy::Ignored);
+        inputTab->setSizePolicy(QSizePolicy::Preferred, output ? QSizePolicy::Ignored : QSizePolicy::Preferred);
+        ioTabs->updateGeometry();
     }
     setSectionVisible(ioTabs, !settings);
     for (QWidget* pWidget : std::as_const(m_settingsWidgets)) {

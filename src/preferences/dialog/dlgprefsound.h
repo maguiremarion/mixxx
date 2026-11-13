@@ -113,6 +113,8 @@ class DlgPrefSound : public DlgPreferencePage, public Ui::DlgPrefSoundDlg  {
     QList<QWidget*> m_settingsWidgets;
     QSet<QWidget*> m_hiddenBySection;
     QLabel* m_pIntro = nullptr;
+    // The Settings section's frame (kiosk): the same box as the tab pane of the Output / Input sections
+    QWidget* m_pSettingsBox = nullptr;
     void setSectionVisible(QWidget* pWidget, bool visible);
 
     std::shared_ptr<SoundManager> m_pSoundManager;
