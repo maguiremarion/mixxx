@@ -11,6 +11,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QProcess>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <cstdlib>
 #include <QUrl>
@@ -889,7 +890,14 @@ void MixxxMainWindow::initialize() {
     if (m_pLaunchImage) {
         if (LaunchImage* pOverlay = m_pSkinLoader->loadLaunchImage(this)) {
             pOverlay->progress(100, QString());
-            pOverlay->setGeometry(rect());
+            // The waveforms and the level meters are native OpenGL windows, which are drawn above every
+            // ordinary child widget: as a child the logo had a black screen with the master level bar
+            // on top of it. A window of its own (transient for this one, so the compositor keeps it
+            // above) covers them too. It takes no input and no focus.
+            pOverlay->setParent(this,
+                    Qt::Window | Qt::FramelessWindowHint | Qt::WindowTransparentForInput);
+            pOverlay->setAttribute(Qt::WA_ShowWithoutActivating);
+            pOverlay->setGeometry(QRect(mapToGlobal(QPoint(0, 0)), size()));
             pOverlay->show();
             pOverlay->raise();
             m_pLaunchOverlay = pOverlay;
@@ -998,21 +1006,46 @@ void MixxxMainWindow::initialize() {
         }
     });
 
-    // Take the overlay down once the skin has had a moment to paint its first frames.
+    // Take the overlay down once the skin has painted its first frames. A fixed delay showed the deck
+    // while its widgets and waveform windows were still being set up (a flicker as they appeared), so
+    // wait until the window has been quiet for a while: the event loop keeps its 50 ms beat for half a
+    // second in a row. At least 900 ms in all, and never longer than 5 s.
     if (m_pLaunchOverlay) {
-        QTimer::singleShot(700, this, [this]() {
-            if (m_pLaunchOverlay) {
-                m_pLaunchOverlay->hide();
-                m_pLaunchOverlay->deleteLater();
-            }
-        });
+        auto* pWatch = new QTimer(this);
+        auto* pClock = new QElapsedTimer();
+        pClock->start();
+        auto* pLastTick = new qint64(0);
+        auto* pQuietTicks = new int(0);
+        pWatch->setInterval(50);
+        connect(pWatch,
+                &QTimer::timeout,
+                this,
+                [this, pWatch, pClock, pLastTick, pQuietTicks]() {
+                    const qint64 now = pClock->elapsed();
+                    const bool onBeat = (now - *pLastTick) <= 80; // 50 ms timer that was not held up
+                    *pLastTick = now;
+                    *pQuietTicks = onBeat ? *pQuietTicks + 1 : 0;
+                    const bool quiet = *pQuietTicks >= 10;
+                    if ((now >= 900 && quiet) || now >= 5000 || !m_pLaunchOverlay) {
+                        if (m_pLaunchOverlay) {
+                            m_pLaunchOverlay->hide();
+                            m_pLaunchOverlay->deleteLater();
+                        }
+                        pWatch->stop();
+                        pWatch->deleteLater();
+                        delete pClock;
+                        delete pLastTick;
+                        delete pQuietTicks;
+                    }
+                });
+        pWatch->start();
     }
 }
 
 void MixxxMainWindow::resizeEvent(QResizeEvent* pEvent) {
     QMainWindow::resizeEvent(pEvent);
     if (m_pLaunchOverlay) {
-        m_pLaunchOverlay->setGeometry(rect());
+        m_pLaunchOverlay->setGeometry(QRect(mapToGlobal(QPoint(0, 0)), size()));
     }
 }
 
