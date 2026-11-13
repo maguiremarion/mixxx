@@ -115,6 +115,12 @@ bool WaveformRendererRGB::preprocessInner() {
     // Effective visual frame for x
     double xVisualFrame = qRound(firstVisualFrame / visualIncrementPerPixel) *
             visualIncrementPerPixel;
+    // The columns are sampled on the pixel grid (a stable picture), then the whole picture is shifted
+    // by the part of a pixel that was rounded away, so it moves smoothly (needs multisampling to
+    // show as a smooth move: see WaveformWidgetFactory::getSurfaceFormat).
+    const float subPixelShift = static_cast<float>(
+            xVisualFrame / visualIncrementPerPixel -
+            firstVisualFrame / visualIncrementPerPixel);
 
     const int numVerticesPerLine = 6; // 2 triangles
 
@@ -145,7 +151,7 @@ bool WaveformRendererRGB::preprocessInner() {
         const int visualIndexStop =
                 std::min(std::max(visualFrameStop, visualFrameStart + 1) * 2, dataSize - 1);
 
-        const float fpos = static_cast<float>(pos) * invDevicePixelRatio;
+        const float fpos = (static_cast<float>(pos) + subPixelShift) * invDevicePixelRatio;
 
         // Find the max values for low, mid, high and all in the waveform data.
         // - Max of left and right

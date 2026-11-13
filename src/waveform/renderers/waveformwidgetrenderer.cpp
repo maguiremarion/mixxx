@@ -209,7 +209,10 @@ void WaveformWidgetRenderer::onPreRender(VSyncTimeProvider* vsyncThread) {
                 type++) {
             // Avoid pixel jitter in play position by rounding to the nearest track
             // pixel.
-            m_pos[type] = round(truePos[type] * m_trackPixelCount) / m_trackPixelCount;
+            // Kiosk: no rounding. The waveform is drawn at fractions of a pixel instead (see the
+            // RGB renderer): zoomed out it scrolls well under a pixel per frame, and rounding made
+            // it advance a whole pixel every few frames, which looked like stutter.
+            m_pos[type] = truePos[type];
             m_posVSample[type] = static_cast<int>(m_pos[type] * m_totalVSamples);
             m_truePosSample[type] = truePos[type] * static_cast<double>(m_trackSamples);
             m_firstDisplayedPosition[type] = m_pos[type] - displayedLengthLeft;

@@ -1506,6 +1506,8 @@ QSurfaceFormat WaveformWidgetFactory::getSurfaceFormat(UserSettingsPointer pConf
     // Reported as https://bugreports.qt.io/browse/QTBUG-114882
     // On Linux, horrible FPS were seen with "VSync off" before switching to QOpenGLWindow too
     format.setSwapInterval(vsyncMode == VSyncThread::ST_PLL ? 1 : 0);
+    // Multisampling: lets the waveform move by fractions of a pixel (smooth scrolling zoomed out).
+    format.setSamples(4);
 #endif
 
 #ifdef FORCE_GLES
