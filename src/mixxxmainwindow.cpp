@@ -1,6 +1,7 @@
 #include "control/controlproxy.h"
 #include "mixxxmainwindow.h"
 
+#include <cmath>
 #include <QLabel>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -206,6 +207,9 @@ MixxxMainWindow::MixxxMainWindow(std::shared_ptr<mixxx::CoreServices> pCoreServi
     // ours is not the one the dots listen to).
     m_pBlinkControl = std::make_unique<ControlObject>(
             ConfigKey(QStringLiteral("[Skin]"), QStringLiteral("blink")));
+    // [Skin],blink_fx: the Beat FX ON button's own blink, on the beat of a fixed tempo (see where it is driven)
+    m_pBlinkFxControl = std::make_unique<ControlObject>(
+            ConfigKey(QStringLiteral("[Skin]"), QStringLiteral("blink_fx")));
 
     // Show launch image immediately so the user knows Mixxx is starting
     m_pSkinLoader = std::make_unique<mixxx::skin::SkinLoader>(m_pCoreServices->getSettings());
@@ -829,6 +833,36 @@ void MixxxMainWindow::initialize() {
         pSession->connectValueChanged(this, update);
         pRecording->connectValueChanged(this, update);
         update();
+    }
+
+    // The Beat FX ON button on screen blinks while the effect is on, once per beat of a fixed 125 BPM: lit for half a beat,
+    // dim for the other half (so the timer ticks twice a beat). [Skin],blink_fx is what the button follows. (The light on the
+    // controller blinks by itself.)
+    {
+        constexpr double kBeatFxBlinkBpm = 125.0;
+        const int halfBeatMs = static_cast<int>(std::lround(60000.0 / kBeatFxBlinkBpm / 2.0)); // 240 ms
+        auto* pBlinkFxTimer = new QTimer(this);
+        pBlinkFxTimer->setInterval(halfBeatMs);
+        connect(pBlinkFxTimer, &QTimer::timeout, this, [this]() {
+            m_pBlinkFxControl->set(m_pBlinkFxControl->get() > 0.5 ? 0.0 : 1.0);
+        });
+        auto* pBeatFx = new ControlProxy(
+                ConfigKey(QStringLiteral("[EffectRack1_EffectUnit1_Effect1]"), QStringLiteral("enabled")),
+                this,
+                ControlFlag::NoAssertIfMissing);
+        const auto updateFx = [this, pBlinkFxTimer, pBeatFx]() {
+            if (pBeatFx->get() > 0.5) {
+                if (!pBlinkFxTimer->isActive()) {
+                    m_pBlinkFxControl->set(1.0);
+                    pBlinkFxTimer->start();
+                }
+            } else {
+                pBlinkFxTimer->stop();
+                m_pBlinkFxControl->set(0.0);
+            }
+        };
+        pBeatFx->connectValueChanged(this, updateFx);
+        updateFx();
     }
 
     // The deck dropped off USB (SoundManager::watchAudio() has paused the decks): say so in a small window of

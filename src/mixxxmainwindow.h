@@ -139,6 +139,7 @@ class MixxxMainWindow : public QMainWindow {
     QPointer<QWidget> m_pLaunchOverlay;
     // [Skin],blink: 1 / 0 every 0.6 s while an Auto DJ session or a recording runs (the top bar's two dots), see the constructor
     std::unique_ptr<ControlObject> m_pBlinkControl;
+    std::unique_ptr<ControlObject> m_pBlinkFxControl;
     QPointer<QWidget> m_pAudioBox; // "Audio device disconnected", see the constructor
 #ifndef __APPLE__
     Qt::WindowStates m_prevState;
