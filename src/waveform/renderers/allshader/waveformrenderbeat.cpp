@@ -154,6 +154,15 @@ bool WaveformRenderBeat::preprocessInner() {
     const float tickLength = std::min(rendererBreadth / 4.f, 14.f);
     const float downbeatTickLength = std::min(rendererBreadth / 3.f, 22.f);
 
+    // The waveform's position is no longer rounded to whole pixels (it moves by fractions of a pixel), so a tick rounded
+    // on its own - to the nearest pixel of the SCREEN - flipped at a different moment from its neighbours: the gaps between
+    // ticks seemed to catch up and slow down. A tick is placed like the waveform's columns instead: on the pixel grid of
+    // the whole TRACK (a beat's own pixel never changes), then everything is moved by the same fraction of a pixel.
+    const double audioSamplePerPixel = m_waveformRenderer->getAudioSamplePerPixel();
+    const double firstTrackPixel = audioSamplePerPixel > 0.0
+            ? firstDisplayedPosition * trackSamples / 2.0 / audioSamplePerPixel
+            : 0.0;
+
     int beatIndex = firstShownIndex;
     for (auto it = trackBeats->iteratorFrom(startPosition);
             it != trackBeats->cend() && *it <= endPosition;
@@ -163,7 +172,10 @@ bool WaveformRenderBeat::preprocessInner() {
                 m_waveformRenderer->transformSamplePositionInRendererWorld(
                         beatPosition, positionType);
 
-        xBeatPoint = qRound(xBeatPoint * devicePixelRatio) / devicePixelRatio;
+        if (audioSamplePerPixel > 0.0) {
+            const double beatTrackPixel = beatPosition / 2.0 / audioSamplePerPixel;
+            xBeatPoint = std::round(beatTrackPixel * devicePixelRatio) / devicePixelRatio - firstTrackPixel;
+        }
 
         const float x1 = static_cast<float>(xBeatPoint);
         const float x2 = x1 + 2.f;
