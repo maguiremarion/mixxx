@@ -141,6 +141,9 @@ class EffectSlot : public QObject {
     void effectChanged();
     void parametersChanged();
     void presetListShowRequest(bool show);
+    /// A controller asked the effect list to step (+1 next / -1 previous) without loading anything yet: the
+    /// selector widget opens its list, moves the highlight and loads the effect when the stepping stops.
+    void presetPickRequest(int direction);
 
   private slots:
     void updateEngineState();
@@ -193,6 +196,8 @@ class EffectSlot : public QObject {
     std::unique_ptr<ControlObject> m_pControlClear;
     std::unique_ptr<ControlPotmeter> m_pControlMetaParameter;
     std::unique_ptr<ControlPushButton> m_pControlShowPresetList;
+    std::unique_ptr<ControlPushButton> m_pControlPickNext;
+    std::unique_ptr<ControlPushButton> m_pControlPickPrev;
 
     SoftTakeover m_metaknobSoftTakeover;
 

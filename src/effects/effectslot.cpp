@@ -135,6 +135,21 @@ EffectSlot::EffectSlot(const QString& group,
     // it'll return a 'confirm' signal which we handle in slotPresetListVisibleChanged
     // and set the control accordingly.
 
+    // pick_next / pick_prev: step the effect list like a controller's FX SELECT button. Nothing is loaded
+    // on each press: the (visible) selector shows where the list is and loads that effect once the presses stop.
+    m_pControlPickNext = std::make_unique<ControlPushButton>(ConfigKey(m_group, "pick_next"));
+    connect(m_pControlPickNext.get(), &ControlObject::valueChanged, this, [this](double value) {
+        if (value > 0) {
+            emit presetPickRequest(1);
+        }
+    });
+    m_pControlPickPrev = std::make_unique<ControlPushButton>(ConfigKey(m_group, "pick_prev"));
+    connect(m_pControlPickPrev.get(), &ControlObject::valueChanged, this, [this](double value) {
+        if (value > 0) {
+            emit presetPickRequest(-1);
+        }
+    });
+
     for (unsigned int i = 0; i < kDefaultMaxParameters; ++i) {
         addEffectParameterSlot(EffectParameterType::Knob);
         addEffectParameterSlot(EffectParameterType::Button);
